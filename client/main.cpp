@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <algorithm>
+#include <limits>
 #include <optional>
 #include <string>
 
@@ -300,29 +301,6 @@ static Rectangle ChatToggleButtonRect() {
     };
 }
 
-static bool IsLocalPlayerEngaged() {
-    if (gClient.GetState() != net::ClientConnectionState::Joined) {
-        return false;
-    }
-
-    for (const net::PlayerState& player : gClient.GetPlayers()) {
-        if (player.id != gClient.GetLocalPlayerId()) {
-            continue;
-        }
-        return player.targetId >= 0 || player.state == net::EntityState::Combat;
-    }
-    return false;
-}
-
-static Rectangle CombatCancelButtonRect() {
-    return {
-        static_cast<float>(GameViewport::kVirtualWidth - 52),
-        20.0f,
-        32.0f,
-        32.0f,
-    };
-}
-
 static Rectangle RespawnGoblinButtonRect() {
     return {
         static_cast<float>(GameViewport::kVirtualWidth - 148),
@@ -330,19 +308,6 @@ static Rectangle RespawnGoblinButtonRect() {
         88.0f,
         32.0f,
     };
-}
-
-static void DrawCombatCancelButton() {
-    if (!IsLocalPlayerEngaged()) {
-        return;
-    }
-
-    const Rectangle bounds = CombatCancelButtonRect();
-    const Vector2 mouse = GetVirtualMousePosition();
-    const bool hover = CheckCollisionPointRec(mouse, bounds);
-    DrawRectangleRec(bounds, hover ? Color{180, 60, 60, 255} : Color{120, 44, 44, 255});
-    DrawRectangleLinesEx(bounds, 1.0f, Color{220, 120, 120, 255});
-    DrawText("X", static_cast<int>(bounds.x + 10), static_cast<int>(bounds.y + 7), 18, RAYWHITE);
 }
 
 static bool IsMouseOverChatPanel(Vector2 virtualPos) {
@@ -453,22 +418,31 @@ static bool ConnectToServer() {
 }
 
 static std::optional<int> TryPickEnemyAtWorld(Vector2 worldPos) {
-    const float pickRadius = net::kEntityPickRadius;
-    const float pickRadiusSq = pickRadius * pickRadius;
+    std::optional<int> bestId;
+    float bestDistSq = std::numeric_limits<float>::max();
 
     for (const net::EnemyState& enemy : gClient.GetEnemies()) {
         if (enemy.state == net::EntityState::Dead) {
             continue;
         }
 
+        const float halfHeight = net::kGoblinSpriteHeight * 0.5f;
+        const float halfWidth = halfHeight * 0.5f;
+        if (worldPos.x < enemy.x - halfWidth || worldPos.x > enemy.x + halfWidth ||
+            worldPos.y < enemy.y - halfHeight || worldPos.y > enemy.y + halfHeight) {
+            continue;
+        }
+
         const float dx = worldPos.x - enemy.x;
         const float dy = worldPos.y - enemy.y;
-        if (dx * dx + dy * dy <= pickRadiusSq) {
-            return enemy.id;
+        const float distSq = dx * dx + dy * dy;
+        if (distSq < bestDistSq) {
+            bestDistSq = distSq;
+            bestId = enemy.id;
         }
     }
 
-    return std::nullopt;
+    return bestId;
 }
 
 static void HandleMapClick() {
@@ -539,11 +513,6 @@ static void HandleUiClicks() {
         } else {
             gChatExpanded = true;
         }
-        return;
-    }
-
-    if (IsLocalPlayerEngaged() && WasUiButtonPressed(CombatCancelButtonRect())) {
-        gClient.SendCancelCombat();
         return;
     }
 
@@ -933,7 +902,6 @@ static void DrawGame() {
 
     DrawText("Multiplayer Template", 20, 20, 24, RAYWHITE);
     DrawText(gStatusText.c_str(), 20, 52, 18, LIGHTGRAY);
-    DrawCombatCancelButton();
     DrawRespawnGoblinButton();
 
     if (gEditingName) {
