@@ -31,6 +31,7 @@ static const char* kAttack3SpritePath =
     "assets/player_sprites/Sprites/without_outline/ATTACK 3.png";
 static const char* kGoblinIdleSpritePath = "assets/enemy/Goblin/Idle.png";
 static const char* kGoblinRunSpritePath = "assets/enemy/Goblin/Run.png";
+static const char* kGoblinAttackSpritePath = "assets/enemy/Goblin/Attack.png";
 static const float kPlayerSpriteHeight = 96.0f;
 static constexpr float kGridScreenBottom = WorldView::kGridVirtualY + net::kWorldHeight;
 
@@ -163,18 +164,31 @@ struct PlayerSprites {
 struct GoblinSprites {
     SpriteSheet idle;
     SpriteSheet run;
+    SpriteSheet attack;
 
     void Load() {
         idle.Load(ResolveAssetPath(kGoblinIdleSpritePath).c_str(), net::kGoblinIdleFrameCount);
         run.Load(ResolveAssetPath(kGoblinRunSpritePath).c_str(), net::kRunFrameCount);
+        attack.Load(ResolveAssetPath(kGoblinAttackSpritePath).c_str(),
+                    net::kGoblinAttackFrameCount);
     }
 
     void Unload() {
         idle.Unload();
         run.Unload();
+        attack.Unload();
     }
 
     bool Loaded() const { return idle.loaded; }
+
+    const SpriteSheet* SheetForAnim(net::PlayerAnim anim) const {
+        switch (anim) {
+            case net::PlayerAnim::Attack1: return attack.loaded ? &attack : nullptr;
+            case net::PlayerAnim::Run: return run.loaded ? &run : nullptr;
+            case net::PlayerAnim::Idle:
+            default: return idle.loaded ? &idle : nullptr;
+        }
+    }
 
     void Draw(const net::EnemyState& enemy, uint32_t serverTick, Vector2 center) const {
         Color tint = WHITE;
@@ -191,9 +205,8 @@ struct GoblinSprites {
 
         const int frame =
             net::GoblinAnimFrameIndex(enemy.anim, serverTick, enemy.animStartTick);
-        if (enemy.anim == net::PlayerAnim::Attack1 && run.loaded) {
-            run.Draw(center, tint, frame % run.frameCount, enemy.facingRight,
-                     net::kGoblinSpriteHeight);
+        if (const SpriteSheet* sheet = SheetForAnim(enemy.anim)) {
+            sheet->Draw(center, tint, frame, enemy.facingRight, net::kGoblinSpriteHeight);
             return;
         }
 
@@ -310,6 +323,15 @@ static Rectangle CombatCancelButtonRect() {
     };
 }
 
+static Rectangle RespawnGoblinButtonRect() {
+    return {
+        static_cast<float>(GameViewport::kVirtualWidth - 148),
+        20.0f,
+        88.0f,
+        32.0f,
+    };
+}
+
 static void DrawCombatCancelButton() {
     if (!IsLocalPlayerEngaged()) {
         return;
@@ -346,6 +368,14 @@ static void DrawUiButton(const char* label, Rectangle bounds) {
 static bool WasUiButtonPressed(Rectangle bounds) {
     return CheckCollisionPointRec(GetVirtualMousePosition(), bounds) &&
            IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+}
+
+static void DrawRespawnGoblinButton() {
+    if (gEditingName || gClient.GetState() != net::ClientConnectionState::Joined) {
+        return;
+    }
+
+    DrawUiButton("Respawn", RespawnGoblinButtonRect());
 }
 
 static std::string TruncateToWidth(const std::string& text, int maxWidth, int fontSize) {
@@ -514,6 +544,12 @@ static void HandleUiClicks() {
 
     if (IsLocalPlayerEngaged() && WasUiButtonPressed(CombatCancelButtonRect())) {
         gClient.SendCancelCombat();
+        return;
+    }
+
+    if (gClient.GetState() == net::ClientConnectionState::Joined &&
+        WasUiButtonPressed(RespawnGoblinButtonRect())) {
+        gClient.SendRespawnEnemy(net::kDefaultGoblinId);
         return;
     }
 }
@@ -898,6 +934,7 @@ static void DrawGame() {
     DrawText("Multiplayer Template", 20, 20, 24, RAYWHITE);
     DrawText(gStatusText.c_str(), 20, 52, 18, LIGHTGRAY);
     DrawCombatCancelButton();
+    DrawRespawnGoblinButton();
 
     if (gEditingName) {
         DrawText("Name:", 20, 100, 20, RAYWHITE);

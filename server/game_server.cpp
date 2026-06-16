@@ -364,32 +364,85 @@ void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
     }
 }
 
-bool TryPerformEnemyAttack(EnemyState& enemy, std::vector<PlayerState>& players, uint32_t tick) {
+void UpdateGoblinCombat(EnemyState& enemy, std::vector<PlayerState>& players, uint32_t tick) {
     if (enemy.state != EntityState::Combat || enemy.targetId < 0) {
-        return false;
+        return;
     }
 
     const PlayerState* player = FindPlayerConst(players, enemy.targetId);
     if (player == nullptr || !IsAlive(player->state) || player->state == EntityState::Hit) {
-        return false;
+        return;
     }
 
     if (!IsInMeleeRange(enemy.x, enemy.y, player->x, player->y)) {
-        return false;
+        return;
+    }
+
+    UpdateEnemyFacing(enemy, player->x - enemy.x, player->y - enemy.y);
+
+    if (enemy.anim == PlayerAnim::Attack1) {
+        if (!enemy.attackDamageDealt) {
+            const int frame =
+                GoblinAnimFrameIndex(PlayerAnim::Attack1, tick, enemy.animStartTick);
+            if (frame == kGoblinAttackDamageFrame) {
+                enemy.attackDamageDealt = true;
+                if (PlayerState* mutablePlayer = FindPlayer(players, enemy.targetId)) {
+                    ApplyDamageToPlayer(*mutablePlayer, kGoblinAttackDamage, tick);
+                }
+            }
+        }
+
+        if (GoblinAnimFinished(PlayerAnim::Attack1, tick, enemy.animStartTick)) {
+            enemy.lastAttackTick = tick;
+            enemy.attackDamageDealt = false;
+            SetEntityAnim(enemy.anim, enemy.animStartTick, PlayerAnim::Idle, tick);
+        }
+        return;
     }
 
     if (tick - enemy.lastAttackTick < static_cast<uint32_t>(kGoblinAttackCooldownTicks)) {
-        return false;
+        return;
     }
 
-    enemy.lastAttackTick = tick;
-    UpdateEnemyFacing(enemy, player->x - enemy.x, player->y - enemy.y);
-    SetEntityAnim(enemy.anim, enemy.animStartTick, PlayerAnim::Attack1, tick);
+    enemy.attackDamageDealt = false;
+    RestartEntityAnim(enemy.anim, enemy.animStartTick, PlayerAnim::Attack1, tick);
+}
 
-    if (PlayerState* mutablePlayer = FindPlayer(players, enemy.targetId)) {
-        ApplyDamageToPlayer(*mutablePlayer, kGoblinAttackDamage, tick);
+void RespawnEnemy(int enemyId, std::vector<EnemyState>& enemies,
+                  std::vector<PlayerState>& players,
+                  std::unordered_map<int, ConnectedClient>& clients, uint32_t tick) {
+    for (PlayerState& player : players) {
+        if (player.targetId != enemyId) {
+            continue;
+        }
+
+        if (IsAlive(player.state) && player.state == EntityState::Combat) {
+            TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                             EntityState::Idle, tick);
+        }
+        player.targetId = -1;
     }
-    return true;
+
+    for (auto& [clientId, client] : clients) {
+        (void)clientId;
+        if (client.pendingAttackEnemyId == enemyId) {
+            client.pendingAttackEnemyId = -1;
+            ResetPlayerCombo(client);
+        }
+    }
+
+    EnemyState* enemy = FindEnemy(enemies, enemyId);
+    if (enemy == nullptr) {
+        EnemyState spawned = CreateDefaultGoblin(enemyId);
+        spawned.stateStartTick = tick;
+        spawned.animStartTick = tick;
+        enemies.push_back(spawned);
+        return;
+    }
+
+    *enemy = CreateDefaultGoblin(enemyId);
+    enemy->stateStartTick = tick;
+    enemy->animStartTick = tick;
 }
 
 void TryCompletePendingEngage(ConnectedClient& client, PlayerState& player,
@@ -550,7 +603,7 @@ void UpdateEnemyEntity(EnemyState& enemy, std::vector<PlayerState>& players, uin
             return;
         }
 
-        TryPerformEnemyAttack(enemy, players, tick);
+        UpdateGoblinCombat(enemy, players, tick);
     }
 }
 
@@ -818,6 +871,16 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             }
 
             CancelPlayerCombat(*player, it->second, enemies_, tick_);
+            break;
+        }
+        case MessageType::RespawnEnemyRequest: {
+            auto it = clients_.find(incoming.clientId);
+            if (it == clients_.end() || !it->second.hasJoined) {
+                return;
+            }
+
+            RespawnEnemy(incoming.message.respawnEnemyRequest.enemyId, enemies_, players_,
+                         clients_, tick_);
             break;
         }
         case MessageType::Ping: {

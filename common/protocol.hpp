@@ -20,6 +20,7 @@ enum class MessageType {
     MoveRequest,
     AttackRequest,
     CancelCombatRequest,
+    RespawnEnemyRequest,
     WorldState,
     PlayerLeft,
     Ping,
@@ -38,6 +39,10 @@ struct AttackRequest {
 };
 
 struct CancelCombatRequest {};
+
+struct RespawnEnemyRequest {
+    int enemyId = kDefaultGoblinId;
+};
 
 struct PlayerState {
     int id = 0;
@@ -107,6 +112,7 @@ struct Message {
     MoveRequest moveRequest;
     AttackRequest attackRequest;
     CancelCombatRequest cancelCombatRequest;
+    RespawnEnemyRequest respawnEnemyRequest;
     WorldState worldState;
     PlayerLeft playerLeft;
     PingMessage ping;
@@ -125,6 +131,7 @@ Message MakeJoinRejected(const std::string& reason);
 Message MakeMoveRequest(int col, int row);
 Message MakeAttackRequest(int enemyId);
 Message MakeCancelCombatRequest();
+Message MakeRespawnEnemyRequest(int enemyId = kDefaultGoblinId);
 Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players,
                        const std::vector<EnemyState>& enemies);
 Message MakePlayerLeft(int playerId);

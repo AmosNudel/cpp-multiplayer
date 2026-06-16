@@ -17,7 +17,7 @@ enum class EntityState {
 
 inline constexpr int kPlayerMaxHp = 100;
 inline constexpr int kPlayerMaxShield = 50;
-inline constexpr int kGoblinMaxHp = 30;
+inline constexpr int kGoblinMaxHp = 150;
 inline constexpr int kPlayerAttackDamage = 10;
 inline constexpr int kGoblinAttackDamage = 8;
 inline constexpr int kHitStunTicks = 8;

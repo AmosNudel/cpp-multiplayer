@@ -31,6 +31,7 @@ public:
     void SendMoveRequest(int col, int row);
     void SendAttackRequest(int enemyId);
     void SendCancelCombat();
+    void SendRespawnEnemy(int enemyId = net::kDefaultGoblinId);
     void SendChat(const std::string& text);
 
     ClientConnectionState GetState() const { return state_; }

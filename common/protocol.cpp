@@ -115,6 +115,7 @@ const char* MessageTypeName(MessageType type) {
         case MessageType::MoveRequest: return "move_request";
         case MessageType::AttackRequest: return "attack_request";
         case MessageType::CancelCombatRequest: return "cancel_combat_request";
+        case MessageType::RespawnEnemyRequest: return "respawn_enemy_request";
         case MessageType::WorldState: return "world_state";
         case MessageType::PlayerLeft: return "player_left";
         case MessageType::Ping: return "ping";
@@ -132,6 +133,7 @@ MessageType ParseMessageType(const std::string& value) {
     if (value == "move_request") return MessageType::MoveRequest;
     if (value == "attack_request") return MessageType::AttackRequest;
     if (value == "cancel_combat_request") return MessageType::CancelCombatRequest;
+    if (value == "respawn_enemy_request") return MessageType::RespawnEnemyRequest;
     if (value == "world_state") return MessageType::WorldState;
     if (value == "player_left") return MessageType::PlayerLeft;
     if (value == "ping") return MessageType::Ping;
@@ -183,6 +185,13 @@ Message MakeAttackRequest(int enemyId) {
 Message MakeCancelCombatRequest() {
     Message message;
     message.type = MessageType::CancelCombatRequest;
+    return message;
+}
+
+Message MakeRespawnEnemyRequest(int enemyId) {
+    Message message;
+    message.type = MessageType::RespawnEnemyRequest;
+    message.respawnEnemyRequest.enemyId = enemyId;
     return message;
 }
 
@@ -272,6 +281,9 @@ std::string SerializeMessage(const Message& message) {
             break;
         case MessageType::CancelCombatRequest:
             break;
+        case MessageType::RespawnEnemyRequest:
+            json["enemy_id"] = message.respawnEnemyRequest.enemyId;
+            break;
         case MessageType::WorldState:
             json["tick"] = message.worldState.tick;
             json["players"] = nlohmann::json::array();
@@ -340,6 +352,10 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
                 message.attackRequest.enemyId = json.at("enemy_id").get<int>();
                 break;
             case MessageType::CancelCombatRequest:
+                break;
+            case MessageType::RespawnEnemyRequest:
+                message.respawnEnemyRequest.enemyId =
+                    json.value("enemy_id", kDefaultGoblinId);
                 break;
             case MessageType::WorldState:
                 message.worldState.tick = json.at("tick").get<uint32_t>();

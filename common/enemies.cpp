@@ -4,9 +4,9 @@
 
 namespace net {
 
-std::vector<EnemyState> CreateDefaultEnemies() {
+EnemyState CreateDefaultGoblin(int id) {
     EnemyState goblin;
-    goblin.id = 1;
+    goblin.id = id;
     goblin.kind = "goblin";
     goblin.x = CellCenterX(kDefaultGoblinCol);
     goblin.y = CellCenterY(kDefaultGoblinRow);
@@ -14,7 +14,11 @@ std::vector<EnemyState> CreateDefaultEnemies() {
     goblin.anim = PlayerAnim::Idle;
     goblin.hp = kGoblinMaxHp;
     goblin.facingRight = false;
-    return {goblin};
+    return goblin;
+}
+
+std::vector<EnemyState> CreateDefaultEnemies() {
+    return {CreateDefaultGoblin(kDefaultGoblinId)};
 }
 
 }  // namespace net
