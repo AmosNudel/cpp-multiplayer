@@ -37,11 +37,6 @@ bool EnvBool(const char* name, bool fallback) {
     return normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on";
 }
 
-bool HasEnv(const char* name) {
-    const char* value = std::getenv(name);
-    return value && value[0] != '\0';
-}
-
 std::string ResolveWebSocketHost() {
     std::string host = EnvString("WS_HOST", "");
     if (!host.empty()) {
