@@ -7,6 +7,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "common/config.hpp"
+
 namespace net {
 
 enum class MessageType {
@@ -34,6 +36,8 @@ struct PlayerState {
     std::string name;
     float x = 0.0f;
     float y = 0.0f;
+    PlayerAnim anim = PlayerAnim::Idle;
+    uint32_t animStartTick = 0;
 };
 
 struct JoinRequest {

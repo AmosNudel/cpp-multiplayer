@@ -159,6 +159,10 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             player.name = client.name;
             player.x = kWorldWidth * 0.5f;
             player.y = kWorldHeight * 0.5f;
+            player.anim = PlayerAnim::Idle;
+            player.animStartTick =
+                tick_ + static_cast<uint32_t>(incoming.clientId % kIdleFrameCount) *
+                            static_cast<uint32_t>(kIdleAnimTicksPerFrame);
             players_.push_back(player);
 
             SendToClient(incoming.clientId, incoming.transport,
@@ -244,6 +248,12 @@ void GameServer::SimulateTick() {
         if (length > 0.0f) {
             dx /= length;
             dy /= length;
+        }
+
+        const PlayerAnim desiredAnim = PlayerAnim::Idle;
+        if (player.anim != desiredAnim) {
+            player.anim = desiredAnim;
+            player.animStartTick = tick_;
         }
 
         player.x += dx * kPlayerSpeed * kTickDuration;

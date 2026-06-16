@@ -14,7 +14,79 @@
 static const int screenWidth = 960;
 static const int screenHeight = 640;
 
+static const char* kIdleSpritePath =
+    "assets/player_sprites/Sprites/with_outline/IDLE.png";
+static const float kPlayerSpriteHeight = 64.0f;
+
+struct PlayerIdleSprite {
+    Texture2D texture{};
+    int frameWidth = 0;
+    int frameHeight = 0;
+    bool loaded = false;
+
+    void Load(const char* path) {
+        texture = LoadTexture(path);
+        if (texture.id == 0) {
+            TraceLog(LOG_WARNING, "Failed to load player sprite: %s", path);
+            return;
+        }
+        frameWidth = texture.width / net::kIdleFrameCount;
+        frameHeight = texture.height;
+        loaded = true;
+    }
+
+    void Unload() {
+        if (loaded) {
+            UnloadTexture(texture);
+            loaded = false;
+        }
+    }
+
+    void Draw(Vector2 center, Color tint, bool highlight, int frame) const {
+        if (!loaded) {
+            DrawCircleV(center, net::kPlayerRadius, tint);
+            if (highlight) {
+                DrawCircleLinesV(center, net::kPlayerRadius + 3.0f, RAYWHITE);
+            }
+            return;
+        }
+
+        frame = frame % net::kIdleFrameCount;
+        const Rectangle source = {
+            static_cast<float>(frame * frameWidth), 0.0f,
+            static_cast<float>(frameWidth), static_cast<float>(frameHeight),
+        };
+        const float scale = kPlayerSpriteHeight / static_cast<float>(frameHeight);
+        const float drawWidth = static_cast<float>(frameWidth) * scale;
+        const float drawHeight = static_cast<float>(frameHeight) * scale;
+        const Rectangle dest = {
+            center.x - drawWidth * 0.5f,
+            center.y - drawHeight * 0.5f,
+            drawWidth,
+            drawHeight,
+        };
+
+        DrawTexturePro(texture, source, dest, Vector2{0.0f, 0.0f}, 0.0f, tint);
+
+        if (highlight) {
+            DrawRectangleLinesEx(dest, 2.0f, RAYWHITE);
+        }
+    }
+};
+
+static std::string ResolveAssetPath(const char* relativePath) {
+    const std::string relative = relativePath;
+    const std::string candidates[] = {relative, "../" + relative};
+    for (const std::string& path : candidates) {
+        if (FileExists(path.c_str())) {
+            return path;
+        }
+    }
+    return relative;
+}
+
 static net::GameClient gClient;
+static PlayerIdleSprite gPlayerIdleSprite;
 static std::string gStatusText = "Press ENTER to connect";
 static std::string gPlayerName = "Player";
 static std::string gChatInput;
@@ -183,19 +255,25 @@ static void DrawGame() {
     DrawRectangleLines(80, 80, static_cast<int>(net::kWorldWidth),
                        static_cast<int>(net::kWorldHeight), Color{70, 76, 92, 255});
 
+    const float nameOffsetY = gPlayerIdleSprite.loaded
+                                  ? kPlayerSpriteHeight * 0.5f + 8.0f
+                                  : net::kPlayerRadius + 22.0f;
+
     for (const net::PlayerState& player : gClient.GetPlayers()) {
         const bool isLocal = player.id == gClient.GetLocalPlayerId();
         const Color color = isLocal ? gLocalColor : ColorForPlayer(player.id);
-        const int x = 80 + static_cast<int>(player.x);
-        const int y = 80 + static_cast<int>(player.y);
-        const int radius = static_cast<int>(net::kPlayerRadius);
+        const Vector2 center = {
+            80.0f + player.x,
+            80.0f + player.y,
+        };
 
-        DrawCircle(x, y, static_cast<float>(radius), color);
-        if (isLocal) {
-            DrawCircleLines(x, y, static_cast<float>(radius + 3), RAYWHITE);
-        }
-
-        DrawText(player.name.c_str(), x - 24, y - radius - 22, 16, RAYWHITE);
+        const int frame = net::AnimFrameIndex(player.anim, gClient.GetServerTick(),
+                                              player.animStartTick);
+        gPlayerIdleSprite.Draw(center, color, isLocal, frame);
+        DrawText(player.name.c_str(),
+                 static_cast<int>(center.x - 24.0f),
+                 static_cast<int>(center.y - nameOffsetY),
+                 16, RAYWHITE);
     }
 
     DrawText("Multiplayer Template", 20, 20, 24, RAYWHITE);
@@ -225,7 +303,9 @@ static void MainLoop() {
 int main() {
     InitWindow(screenWidth, screenHeight, "Multiplayer Game");
     SetTargetFPS(60);
+    gPlayerIdleSprite.Load(ResolveAssetPath(kIdleSpritePath).c_str());
     emscripten_set_main_loop(MainLoop, 0, 1);
+    gPlayerIdleSprite.Unload();
     CloseWindow();
     return 0;
 }
@@ -233,6 +313,7 @@ int main() {
 int main() {
     InitWindow(screenWidth, screenHeight, "Multiplayer Game");
     SetTargetFPS(60);
+    gPlayerIdleSprite.Load(ResolveAssetPath(kIdleSpritePath).c_str());
 
     while (!WindowShouldClose()) {
         UpdateGame();
@@ -240,6 +321,7 @@ int main() {
     }
 
     gClient.Disconnect();
+    gPlayerIdleSprite.Unload();
     CloseWindow();
     return 0;
 }

@@ -82,6 +82,12 @@ if(BUILD_CLIENT)
         endif()
     endif()
 
+    add_custom_command(TARGET game_client POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:game_client>/assets
+        COMMENT "Copying assets next to game_client"
+    )
+
     if(WIN32)
         target_link_libraries(game_client PRIVATE
             net_common

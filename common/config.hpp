@@ -20,7 +20,57 @@ inline constexpr float kWorldWidth = 800.0f;
 inline constexpr float kWorldHeight = 600.0f;
 inline constexpr float kPlayerSpeed = 200.0f;
 inline constexpr float kPlayerRadius = 16.0f;
+inline constexpr int kIdleFrameCount = 7;
+inline constexpr int kIdleAnimTicksPerFrame = 2;
 inline constexpr int kMaxChatLength = 120;
+
+enum class PlayerAnim {
+    Idle,
+};
+
+inline const char* PlayerAnimName(PlayerAnim anim) {
+    switch (anim) {
+        case PlayerAnim::Idle: return "idle";
+    }
+    return "idle";
+}
+
+inline PlayerAnim ParsePlayerAnim(const std::string& value) {
+    if (value == "idle") {
+        return PlayerAnim::Idle;
+    }
+    return PlayerAnim::Idle;
+}
+
+inline int AnimFrameCount(PlayerAnim anim) {
+    switch (anim) {
+        case PlayerAnim::Idle: return kIdleFrameCount;
+    }
+    return kIdleFrameCount;
+}
+
+inline int AnimTicksPerFrame(PlayerAnim anim) {
+    switch (anim) {
+        case PlayerAnim::Idle: return kIdleAnimTicksPerFrame;
+    }
+    return kIdleAnimTicksPerFrame;
+}
+
+inline int AnimFrameIndex(PlayerAnim anim, uint32_t serverTick, uint32_t animStartTick) {
+    if (serverTick < animStartTick) {
+        return 0;
+    }
+
+    const uint32_t elapsed = serverTick - animStartTick;
+    const int frameCount = AnimFrameCount(anim);
+    const int ticksPerFrame = AnimTicksPerFrame(anim);
+    if (frameCount <= 0 || ticksPerFrame <= 0) {
+        return 0;
+    }
+
+    return static_cast<int>((elapsed / static_cast<uint32_t>(ticksPerFrame)) %
+                            static_cast<uint32_t>(frameCount));
+}
 inline constexpr int kMaxChatHistory = 8;
 inline constexpr int kServerChatPlayerId = 0;
 

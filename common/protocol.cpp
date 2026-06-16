@@ -13,6 +13,8 @@ nlohmann::json PlayerStateToJson(const PlayerState& player) {
         {"name", player.name},
         {"x", player.x},
         {"y", player.y},
+        {"anim", PlayerAnimName(player.anim)},
+        {"anim_start_tick", player.animStartTick},
     };
 }
 
@@ -22,6 +24,8 @@ PlayerState PlayerStateFromJson(const nlohmann::json& json) {
     player.name = json.at("name").get<std::string>();
     player.x = json.at("x").get<float>();
     player.y = json.at("y").get<float>();
+    player.anim = ParsePlayerAnim(json.value("anim", "idle"));
+    player.animStartTick = json.value("anim_start_tick", 0u);
     return player;
 }
 
