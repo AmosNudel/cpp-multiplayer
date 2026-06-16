@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <string>
 
+#include "client/connection_config.hpp"
 #include "client/game_client.hpp"
 #include "common/config.hpp"
 
@@ -56,15 +57,12 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
 
 static bool ConnectToServer() {
 #if defined(PLATFORM_WEB)
-    const char* host = net::EnvString("WS_HOST", "localhost").c_str();
-    const uint16_t port = net::EnvPort("WS_PORT", net::kDefaultWsPort);
-    char url[256];
-    std::snprintf(url, sizeof(url), "ws://%s:%u", host, port);
+    const std::string url = net::BuildWebSocketUrl();
     return gClient.ConnectWeb(url, gPlayerName, OnConnectionState);
 #else
-    const std::string host = net::EnvString("SERVER_HOST", "127.0.0.1");
-    const uint16_t port = net::EnvPort("SERVER_PORT", net::kDefaultTcpPort);
-    return gClient.ConnectDesktop(host, port, gPlayerName, OnConnectionState);
+    const net::DesktopEndpoint endpoint = net::GetDesktopEndpoint();
+    return gClient.ConnectDesktop(endpoint.host, endpoint.port, gPlayerName,
+                                  OnConnectionState);
 #endif
 }
 

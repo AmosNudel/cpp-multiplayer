@@ -1,12 +1,19 @@
 # Builds the web (Emscripten) client with WebSocket networking.
 param(
-    [string]$DeployPath = ""
+    [string]$DeployPath = "",
+    [string]$WsHost = ""
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $root "build-web"
 $exeName = "MultiplayerGame"
+$loader = Join-Path $PSScriptRoot "load_production_config.ps1"
+
+if ($WsHost -eq "") {
+    $config = & $loader -Required
+    $WsHost = $config.WsHost
+}
 
 function Find-EmsdkEnv {
     $candidates = @(
@@ -53,30 +60,36 @@ if (-not (Test-Path $toolchain)) {
 }
 
 Write-Host "Configuring web build..."
-& cmake -S $root -B $buildDir `
-    -DCMAKE_TOOLCHAIN_FILE="$toolchain" `
-    -DBUILD_SERVER=OFF `
-    -DBUILD_CLIENT=ON `
-    -DRAYLIB_PATH=C:/raylib/raylib `
-    -DCMAKE_BUILD_TYPE=Release
+$cmakeConfigureArgs = @(
+    "-S", $root,
+    "-B", $buildDir,
+    "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
+    "-DBUILD_SERVER=OFF",
+    "-DBUILD_CLIENT=ON",
+    "-DRAYLIB_PATH=C:/raylib/raylib",
+    "-DCMAKE_BUILD_TYPE=Release"
+)
+if ($WsHost -ne "") {
+    $cmakeConfigureArgs += "-DWS_HOST_DEFAULT=$WsHost"
+}
+& cmake @cmakeConfigureArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# Emscripten-specific link flags for raylib web + websocket client.
-$linkFlags = @(
-    "-sUSE_GLFW=3"
-    "-sALLOW_MEMORY_GROWTH=1"
-    "-sASYNCIFY"
-    "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
-    "--shell-file=C:/raylib/raylib/src/shell.html"
-)
 $flagsJoined = ($linkFlags -join " ")
-& cmake -S $root -B $buildDir `
-    -DCMAKE_TOOLCHAIN_FILE="$toolchain" `
-    -DBUILD_SERVER=OFF `
-    -DBUILD_CLIENT=ON `
-    -DRAYLIB_PATH=C:/raylib/raylib `
-    -DCMAKE_BUILD_TYPE=Release `
+$cmakeLinkArgs = @(
+    "-S", $root,
+    "-B", $buildDir,
+    "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
+    "-DBUILD_SERVER=OFF",
+    "-DBUILD_CLIENT=ON",
+    "-DRAYLIB_PATH=C:/raylib/raylib",
+    "-DCMAKE_BUILD_TYPE=Release",
     "-DCMAKE_EXE_LINKER_FLAGS=$flagsJoined"
+)
+if ($WsHost -ne "") {
+    $cmakeLinkArgs += "-DWS_HOST_DEFAULT=$WsHost"
+}
+& cmake @cmakeLinkArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "Compiling web build..."
@@ -100,4 +113,7 @@ Write-Host ""
 Write-Host "Web build ready!"
 Write-Host "  $webOut"
 Write-Host ""
-Write-Host "Set WS_HOST / WS_PORT in the shell URL or environment before loading."
+Write-Host "Production WebSocket URL (auto when hosted on HTTPS):"
+Write-Host "  wss://$WsHost"
+Write-Host ""
+Write-Host "Override with WS_HOST / WS_TLS env vars if needed."

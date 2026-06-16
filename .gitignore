@@ -13,4 +13,5 @@ _deps/
 *.wasm
 *.html
 *.js
-*.data
+config/production.env.ps1
+assets/

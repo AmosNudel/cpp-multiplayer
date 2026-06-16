@@ -50,6 +50,7 @@ if(BUILD_CLIENT)
 
     add_executable(game_client
         client/main.cpp
+        client/connection_config.cpp
         client/game_client.cpp
         client/tcp_client.cpp
         client/ws_client.cpp
@@ -59,8 +60,11 @@ if(BUILD_CLIENT)
         ${RAYLIB_PATH}/src
     )
 
-    if(EMSCRIPTEN)
+    if (EMSCRIPTEN)
         target_compile_definitions(game_client PRIVATE PLATFORM_WEB)
+        if(DEFINED WS_HOST_DEFAULT AND NOT WS_HOST_DEFAULT STREQUAL "")
+            target_compile_definitions(game_client PRIVATE WS_HOST_DEFAULT="${WS_HOST_DEFAULT}")
+        endif()
         target_link_options(game_client PRIVATE
             -sUSE_GLFW=3
             -sALLOW_MEMORY_GROWTH=1
@@ -70,6 +74,12 @@ if(BUILD_CLIENT)
         target_sources(game_client PRIVATE ${RAYLIB_PATH}/src/libraylib.a)
     else()
         target_compile_definitions(game_client PRIVATE PLATFORM_DESKTOP)
+        if(DEFINED SERVER_HOST_DEFAULT AND NOT SERVER_HOST_DEFAULT STREQUAL "")
+            target_compile_definitions(game_client PRIVATE SERVER_HOST_DEFAULT="${SERVER_HOST_DEFAULT}")
+        endif()
+        if(DEFINED SERVER_PORT_DEFAULT AND NOT SERVER_PORT_DEFAULT STREQUAL "")
+            target_compile_definitions(game_client PRIVATE SERVER_PORT_DEFAULT=${SERVER_PORT_DEFAULT})
+        endif()
     endif()
 
     if(WIN32)

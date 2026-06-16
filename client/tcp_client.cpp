@@ -1,6 +1,7 @@
 #include "tcp_client.hpp"
 
-#include <iostream>
+#include <functional>
+#include <vector>
 
 namespace net {
 
@@ -8,9 +9,8 @@ TcpClient::~TcpClient() {
     Disconnect();
 }
 
-bool TcpClient::Connect(const std::string& host, uint16_t port, MessageHandler onMessage) {
+bool TcpClient::Connect(const std::string& host, uint16_t port) {
     Disconnect();
-    onMessage_ = std::move(onMessage);
 
     if (!InitSockets()) {
         return false;
@@ -54,6 +54,7 @@ bool TcpClient::Connect(const std::string& host, uint16_t port, MessageHandler o
 void TcpClient::Disconnect() {
     running_ = false;
     connected_ = false;
+    connectionLost_ = false;
 
     if (socket_ != kInvalidSocket) {
         CloseSocket(socket_);
@@ -62,6 +63,11 @@ void TcpClient::Disconnect() {
 
     if (receiveThread_.joinable()) {
         receiveThread_.join();
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(incomingMutex_);
+        incoming_.clear();
     }
 
     ShutdownSockets();
@@ -79,10 +85,34 @@ bool TcpClient::Send(const Message& message) {
     return SendAll(socket_, frame.data(), frame.size());
 }
 
+void TcpClient::Poll(std::function<void(const Message&)> onMessage) {
+    std::deque<Message> batch;
+    {
+        std::lock_guard<std::mutex> lock(incomingMutex_);
+        batch.swap(incoming_);
+    }
+
+    for (const Message& message : batch) {
+        if (onMessage) {
+            onMessage(message);
+        }
+    }
+}
+
+bool TcpClient::ConsumeConnectionLost() {
+    return connectionLost_.exchange(false);
+}
+
+void TcpClient::EnqueueMessage(const Message& message) {
+    std::lock_guard<std::mutex> lock(incomingMutex_);
+    incoming_.push_back(message);
+}
+
 void TcpClient::ReceiveLoop() {
     while (running_ && connected_) {
         if (!RecvSome(socket_, receiveBuffer_)) {
             connected_ = false;
+            connectionLost_ = true;
             break;
         }
 
@@ -93,10 +123,14 @@ void TcpClient::ReceiveLoop() {
             }
 
             std::optional<Message> message = DeserializeMessage(*json);
-            if (message && onMessage_) {
-                onMessage_(*message);
+            if (message) {
+                EnqueueMessage(*message);
             }
         }
+    }
+
+    if (running_) {
+        connectionLost_ = true;
     }
 }
 

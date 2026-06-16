@@ -3,7 +3,9 @@ param(
     [ValidateSet("Debug", "Release")]
     [string]$Config = "Release",
     [switch]$ServerOnly,
-    [switch]$ClientOnly
+    [switch]$ClientOnly,
+    [string]$ServerHost = "",
+    [string]$ServerPort = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,6 +46,13 @@ $cmakeArgs = @(
     "-DBUILD_SERVER=$buildServer",
     "-DBUILD_CLIENT=$buildClient"
 )
+
+if ($ServerHost -ne "") {
+    $cmakeArgs += "-DSERVER_HOST_DEFAULT=$ServerHost"
+}
+if ($ServerPort -ne "") {
+    $cmakeArgs += "-DSERVER_PORT_DEFAULT=$ServerPort"
+}
 
 Write-Host "Configuring CMake (MinGW)..."
 & cmake @cmakeArgs

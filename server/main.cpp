@@ -1,6 +1,10 @@
 #include <csignal>
 #include <iostream>
 
+#ifndef _WIN32
+#include <signal.h>
+#endif
+
 #include "common/config.hpp"
 #include "server/game_server.hpp"
 
@@ -27,6 +31,9 @@ int main() {
     gServer = &server;
     std::signal(SIGINT, HandleSignal);
     std::signal(SIGTERM, HandleSignal);
+#ifndef _WIN32
+    std::signal(SIGPIPE, SIG_IGN);
+#endif
 
     if (!server.Start(tcpPort, wsPort)) {
         std::cerr << "Failed to start server.\n";

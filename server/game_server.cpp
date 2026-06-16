@@ -22,7 +22,7 @@ bool GameServer::Start(uint16_t tcpPort, uint16_t wsPort) {
     };
 
     auto onDisconnect = [this](int clientId) {
-        HandleDisconnect(clientId, TransportForClientId(clientId));
+        EnqueueDisconnect(clientId, TransportForClientId(clientId));
     };
 
     if (!tcpListener_.Start(tcpPort, onMessage, onDisconnect)) {
@@ -54,6 +54,7 @@ void GameServer::Run() {
 
     while (running_) {
         ProcessMessages();
+        ProcessDisconnects();
 
         const auto now = Clock::now();
         if (now >= nextTick) {
@@ -75,6 +76,11 @@ void GameServer::EnqueueMessage(int clientId, TransportKind transport, const Mes
     incoming_.push_back(IncomingMessage{clientId, transport, message});
 }
 
+void GameServer::EnqueueDisconnect(int clientId, TransportKind transport) {
+    std::lock_guard<std::mutex> lock(incomingMutex_);
+    pendingDisconnects_.push_back(PendingDisconnect{clientId, transport});
+}
+
 void GameServer::ProcessMessages() {
     std::deque<IncomingMessage> batch;
     {
@@ -84,6 +90,18 @@ void GameServer::ProcessMessages() {
 
     for (const IncomingMessage& incoming : batch) {
         HandleMessage(incoming);
+    }
+}
+
+void GameServer::ProcessDisconnects() {
+    std::deque<PendingDisconnect> batch;
+    {
+        std::lock_guard<std::mutex> lock(incomingMutex_);
+        batch.swap(pendingDisconnects_);
+    }
+
+    for (const PendingDisconnect& pending : batch) {
+        HandleDisconnect(pending.clientId, pending.transport);
     }
 }
 
@@ -181,8 +199,17 @@ void GameServer::SimulateTick() {
 
 void GameServer::BroadcastWorldState() {
     const Message state = MakeWorldState(tick_, players_);
+
+    std::vector<std::pair<int, TransportKind>> recipients;
+    recipients.reserve(transportByClientId_.size());
     for (const auto& [clientId, transport] : transportByClientId_) {
-        SendToClient(clientId, transport, state);
+        recipients.emplace_back(clientId, transport);
+    }
+
+    for (const auto& [clientId, transport] : recipients) {
+        if (!SendToClient(clientId, transport, state)) {
+            EnqueueDisconnect(clientId, transport);
+        }
     }
 }
 

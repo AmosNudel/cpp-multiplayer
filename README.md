@@ -32,3 +32,13 @@ Read **[NETWORKING_GUIDE.md](NETWORKING_GUIDE.md)** for:
 | `server/` | Headless authoritative host |
 | `client/` | raylib game + network client |
 | `tools/` | Build and installer scripts |
+| `config/` | Production server endpoints (`production.env.ps1`, gitignored) |
+
+## Production config (before first git push)
+
+```powershell
+copy config\production.env.ps1.example config\production.env.ps1
+# Edit production.env.ps1 with your Railway TCP proxy + domain
+```
+
+`production.env.ps1` is gitignored. Commit only the `.example` template.

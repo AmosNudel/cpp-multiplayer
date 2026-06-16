@@ -132,6 +132,8 @@ void TcpListener::AcceptLoop() {
             continue;
         }
 
+        SetSocketNonBlocking(clientSocket);
+
         auto client = std::make_shared<Client>();
         {
             std::lock_guard<std::mutex> lock(clientsMutex_);

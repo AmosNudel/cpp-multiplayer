@@ -42,10 +42,15 @@ bool SetSocketReuseAddr(SocketHandle socket) {
 bool SendAll(SocketHandle socket, const uint8_t* data, size_t size) {
     size_t sentTotal = 0;
     while (sentTotal < size) {
+#ifdef _WIN32
+        const int flags = 0;
+#else
+        const int flags = MSG_NOSIGNAL;
+#endif
         const int sent = send(socket,
                               reinterpret_cast<const char*>(data + sentTotal),
                               static_cast<int>(size - sentTotal),
-                              0);
+                              flags);
         if (sent <= 0) {
             return false;
         }

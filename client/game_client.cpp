@@ -23,8 +23,7 @@ bool GameClient::ConnectDesktop(const std::string& host, uint16_t port,
     onState_ = std::move(onState);
     SetState(ClientConnectionState::Connecting, "Connecting via TCP...");
 
-    auto onMessage = [this](const Message& message) { HandleMessage(message); };
-    if (!tcpClient_.Connect(host, port, onMessage)) {
+    if (!tcpClient_.Connect(host, port)) {
         SetState(ClientConnectionState::Disconnected, "TCP connection failed");
         return false;
     }
@@ -39,15 +38,21 @@ bool GameClient::ConnectWeb(const std::string& wsUrl, const std::string& playerN
     useWebSocket_ = true;
     playerName_ = playerName;
     onState_ = std::move(onState);
-    SetState(ClientConnectionState::Connecting, "Connecting via WebSocket...");
+    SetState(ClientConnectionState::Connecting, "Connecting via WebSocket to " + wsUrl + "...");
 
-    auto onMessage = [this](const Message& message) { HandleMessage(message); };
-    if (!wsClient_.Connect(wsUrl, onMessage)) {
+    auto onOpen = [this]() {
+        wsClient_.Send(MakeJoinRequest(playerName_));
+    };
+    auto onError = [this](const std::string& reason) {
+        pendingDisconnect_ = true;
+        pendingDetail_ = reason;
+    };
+
+    if (!wsClient_.Connect(wsUrl, onOpen, onError)) {
         SetState(ClientConnectionState::Disconnected, "WebSocket setup failed");
         return false;
     }
 
-    wsClient_.Send(MakeJoinRequest(playerName_));
     return true;
 }
 
@@ -58,12 +63,48 @@ void GameClient::Disconnect() {
     players_.clear();
     serverTick_ = 0;
     pingMs_ = 0;
+    pendingDisconnect_ = false;
+    pendingDetail_.clear();
     SetState(ClientConnectionState::Disconnected);
 }
 
 void GameClient::Update() {
+    auto onMessage = [this](const Message& message) { HandleMessage(message); };
+
     if (useWebSocket_) {
-        wsClient_.Poll();
+        wsClient_.Poll(onMessage);
+        if (wsClient_.ConsumeConnectionLost() && state_ == ClientConnectionState::Joined) {
+            pendingDisconnect_ = true;
+            pendingDetail_ = "Connection lost";
+        }
+    } else {
+        tcpClient_.Poll(onMessage);
+        if (tcpClient_.ConsumeConnectionLost() && state_ == ClientConnectionState::Joined) {
+            pendingDisconnect_ = true;
+            pendingDetail_ = "Connection lost";
+        }
+    }
+
+    if (pendingDisconnect_) {
+        const bool wasRejected = (state_ == ClientConnectionState::Rejected);
+        const std::string detail = pendingDetail_;
+        pendingDisconnect_ = false;
+        pendingDetail_.clear();
+
+        tcpClient_.Disconnect();
+        wsClient_.Disconnect();
+        localPlayerId_ = 0;
+        players_.clear();
+        serverTick_ = 0;
+        pingMs_ = 0;
+
+        if (wasRejected) {
+            SetState(ClientConnectionState::Rejected, detail);
+        } else {
+            SetState(ClientConnectionState::Disconnected,
+                     detail.empty() ? "Disconnected" : detail);
+        }
+        return;
     }
 
     if (state_ != ClientConnectionState::Joined) {
@@ -103,8 +144,9 @@ void GameClient::HandleMessage(const Message& message) {
             SetState(ClientConnectionState::Joined, "Joined game");
             break;
         case MessageType::JoinRejected:
+            pendingDisconnect_ = true;
+            pendingDetail_ = message.joinRejected.reason;
             SetState(ClientConnectionState::Rejected, message.joinRejected.reason);
-            Disconnect();
             break;
         case MessageType::WorldState:
             serverTick_ = message.worldState.tick;

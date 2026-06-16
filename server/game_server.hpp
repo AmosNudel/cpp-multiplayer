@@ -40,8 +40,15 @@ private:
         Message message;
     };
 
+    struct PendingDisconnect {
+        int clientId = 0;
+        TransportKind transport = TransportKind::Tcp;
+    };
+
     void EnqueueMessage(int clientId, TransportKind transport, const Message& message);
+    void EnqueueDisconnect(int clientId, TransportKind transport);
     void ProcessMessages();
+    void ProcessDisconnects();
     void HandleMessage(const IncomingMessage& incoming);
     void HandleDisconnect(int clientId, TransportKind transport);
     void SimulateTick();
@@ -54,6 +61,7 @@ private:
     WsListener wsListener_;
     std::mutex incomingMutex_;
     std::deque<IncomingMessage> incoming_;
+    std::deque<PendingDisconnect> pendingDisconnects_;
     std::unordered_map<int, ConnectedClient> clients_;
     std::unordered_map<int, TransportKind> transportByClientId_;
     std::vector<PlayerState> players_;

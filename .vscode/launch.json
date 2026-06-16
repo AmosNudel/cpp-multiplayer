@@ -1,5 +1,19 @@
 {
     "version": "0.2.0",
+    "inputs": [
+        {
+            "id": "productionServerHost",
+            "type": "promptString",
+            "description": "Railway TCP proxy host (see config/production.env.ps1)",
+            "default": "your-tcp-proxy.rlwy.net"
+        },
+        {
+            "id": "productionServerPort",
+            "type": "promptString",
+            "description": "Railway TCP proxy port",
+            "default": "00000"
+        }
+    ],
     "configurations": [
         {
             "name": "Debug Client",
@@ -36,6 +50,23 @@
             "environment": [
                 { "name": "SERVER_HOST", "value": "127.0.0.1" },
                 { "name": "SERVER_PORT", "value": "7777" }
+            ],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:/raylib/w64devkit/bin/gdb.exe",
+            "preLaunchTask": "cmake: build release"
+        },
+        {
+            "name": "Run Client (Railway)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/game_client.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [
+                { "name": "SERVER_HOST", "value": "${input:productionServerHost}" },
+                { "name": "SERVER_PORT", "value": "${input:productionServerPort}" }
             ],
             "externalConsole": false,
             "MIMode": "gdb",

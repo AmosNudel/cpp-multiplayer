@@ -51,6 +51,8 @@ private:
     uint32_t serverTick_ = 0;
     int pingMs_ = 0;
     uint32_t lastPingSentMs_ = 0;
+    bool pendingDisconnect_ = false;
+    std::string pendingDetail_;
     std::mutex stateMutex_;
 };
 
