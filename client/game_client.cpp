@@ -127,12 +127,12 @@ void GameClient::Update() {
     }
 }
 
-void GameClient::SendInput(const PlayerInput& input) {
+void GameClient::SendMoveRequest(int col, int row) {
     if (state_ != ClientConnectionState::Joined) {
         return;
     }
 
-    const Message message = MakePlayerInput(input);
+    const Message message = MakeMoveRequest(col, row);
     if (useWebSocket_) {
         wsClient_.Send(message);
     } else {

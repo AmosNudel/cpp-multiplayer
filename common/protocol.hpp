@@ -15,7 +15,7 @@ enum class MessageType {
     JoinRequest,
     JoinAccepted,
     JoinRejected,
-    PlayerInput,
+    MoveRequest,
     WorldState,
     PlayerLeft,
     Ping,
@@ -24,11 +24,9 @@ enum class MessageType {
     ChatHistory,
 };
 
-struct PlayerInput {
-    bool up = false;
-    bool down = false;
-    bool left = false;
-    bool right = false;
+struct MoveRequest {
+    int col = 0;
+    int row = 0;
 };
 
 struct PlayerState {
@@ -39,6 +37,8 @@ struct PlayerState {
     PlayerAnim anim = PlayerAnim::Idle;
     uint32_t animStartTick = 0;
     bool facingRight = true;
+    int moveTargetCol = -1;
+    int moveTargetRow = -1;
 };
 
 struct JoinRequest {
@@ -87,7 +87,7 @@ struct Message {
     JoinRequest joinRequest;
     JoinAccepted joinAccepted;
     JoinRejected joinRejected;
-    PlayerInput playerInput;
+    MoveRequest moveRequest;
     WorldState worldState;
     PlayerLeft playerLeft;
     PingMessage ping;
@@ -102,7 +102,7 @@ MessageType ParseMessageType(const std::string& value);
 Message MakeJoinRequest(const std::string& name);
 Message MakeJoinAccepted(int playerId, const std::vector<PlayerState>& players);
 Message MakeJoinRejected(const std::string& reason);
-Message MakePlayerInput(const PlayerInput& input);
+Message MakeMoveRequest(int col, int row);
 Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players);
 Message MakePlayerLeft(int playerId);
 Message MakePing(uint32_t clientTimeMs);

@@ -28,7 +28,7 @@ public:
                     StateHandler onState);
     void Disconnect();
     void Update();
-    void SendInput(const PlayerInput& input);
+    void SendMoveRequest(int col, int row);
     void SendChat(const std::string& text);
 
     ClientConnectionState GetState() const { return state_; }

@@ -8,7 +8,7 @@ namespace net {
 namespace {
 
 nlohmann::json PlayerStateToJson(const PlayerState& player) {
-    return {
+    nlohmann::json json = {
         {"id", player.id},
         {"name", player.name},
         {"x", player.x},
@@ -17,6 +17,11 @@ nlohmann::json PlayerStateToJson(const PlayerState& player) {
         {"anim_start_tick", player.animStartTick},
         {"facing_right", player.facingRight},
     };
+    if (player.moveTargetCol >= 0 && player.moveTargetRow >= 0) {
+        json["move_target_col"] = player.moveTargetCol;
+        json["move_target_row"] = player.moveTargetRow;
+    }
+    return json;
 }
 
 PlayerState PlayerStateFromJson(const nlohmann::json& json) {
@@ -28,6 +33,8 @@ PlayerState PlayerStateFromJson(const nlohmann::json& json) {
     player.anim = ParsePlayerAnim(json.value("anim", "idle"));
     player.animStartTick = json.value("anim_start_tick", 0u);
     player.facingRight = json.value("facing_right", true);
+    player.moveTargetCol = json.value("move_target_col", -1);
+    player.moveTargetRow = json.value("move_target_row", -1);
     return player;
 }
 
@@ -58,7 +65,7 @@ const char* MessageTypeName(MessageType type) {
         case MessageType::JoinRequest: return "join_request";
         case MessageType::JoinAccepted: return "join_accepted";
         case MessageType::JoinRejected: return "join_rejected";
-        case MessageType::PlayerInput: return "player_input";
+        case MessageType::MoveRequest: return "move_request";
         case MessageType::WorldState: return "world_state";
         case MessageType::PlayerLeft: return "player_left";
         case MessageType::Ping: return "ping";
@@ -73,7 +80,7 @@ MessageType ParseMessageType(const std::string& value) {
     if (value == "join_request") return MessageType::JoinRequest;
     if (value == "join_accepted") return MessageType::JoinAccepted;
     if (value == "join_rejected") return MessageType::JoinRejected;
-    if (value == "player_input") return MessageType::PlayerInput;
+    if (value == "move_request") return MessageType::MoveRequest;
     if (value == "world_state") return MessageType::WorldState;
     if (value == "player_left") return MessageType::PlayerLeft;
     if (value == "ping") return MessageType::Ping;
@@ -105,10 +112,11 @@ Message MakeJoinRejected(const std::string& reason) {
     return message;
 }
 
-Message MakePlayerInput(const PlayerInput& input) {
+Message MakeMoveRequest(int col, int row) {
     Message message;
-    message.type = MessageType::PlayerInput;
-    message.playerInput = input;
+    message.type = MessageType::MoveRequest;
+    message.moveRequest.col = col;
+    message.moveRequest.row = row;
     return message;
 }
 
@@ -183,11 +191,9 @@ std::string SerializeMessage(const Message& message) {
         case MessageType::JoinRejected:
             json["reason"] = message.joinRejected.reason;
             break;
-        case MessageType::PlayerInput:
-            json["up"] = message.playerInput.up;
-            json["down"] = message.playerInput.down;
-            json["left"] = message.playerInput.left;
-            json["right"] = message.playerInput.right;
+        case MessageType::MoveRequest:
+            json["col"] = message.moveRequest.col;
+            json["row"] = message.moveRequest.row;
             break;
         case MessageType::WorldState:
             json["tick"] = message.worldState.tick;
@@ -240,11 +246,9 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
             case MessageType::JoinRejected:
                 message.joinRejected.reason = json.at("reason").get<std::string>();
                 break;
-            case MessageType::PlayerInput:
-                message.playerInput.up = json.value("up", false);
-                message.playerInput.down = json.value("down", false);
-                message.playerInput.left = json.value("left", false);
-                message.playerInput.right = json.value("right", false);
+            case MessageType::MoveRequest:
+                message.moveRequest.col = json.at("col").get<int>();
+                message.moveRequest.row = json.at("row").get<int>();
                 break;
             case MessageType::WorldState:
                 message.worldState.tick = json.at("tick").get<uint32_t>();

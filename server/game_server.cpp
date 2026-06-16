@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "common/config.hpp"
+#include "common/grid.hpp"
 
 namespace net {
 namespace {
@@ -157,12 +158,14 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             PlayerState player;
             player.id = incoming.clientId;
             player.name = client.name;
-            player.x = kWorldWidth * 0.5f;
-            player.y = kWorldHeight * 0.5f;
+            player.x = CellCenterX(kGridCols / 2);
+            player.y = CellCenterY(kGridRows / 2);
             player.anim = PlayerAnim::Idle;
             player.animStartTick =
                 tick_ + static_cast<uint32_t>(incoming.clientId % kIdleFrameCount) *
                             static_cast<uint32_t>(kIdleAnimTicksPerFrame);
+            player.moveTargetCol = -1;
+            player.moveTargetRow = -1;
             players_.push_back(player);
 
             SendToClient(incoming.clientId, incoming.transport,
@@ -175,12 +178,29 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
                       << incoming.clientId << "\n";
             break;
         }
-        case MessageType::PlayerInput: {
+        case MessageType::MoveRequest: {
             auto it = clients_.find(incoming.clientId);
             if (it == clients_.end() || !it->second.hasJoined) {
                 return;
             }
-            it->second.input = incoming.message.playerInput;
+
+            const int col = incoming.message.moveRequest.col;
+            const int row = incoming.message.moveRequest.row;
+            if (!IsValidCell(col, row)) {
+                return;
+            }
+
+            it->second.hasMoveTarget = true;
+            it->second.targetCol = col;
+            it->second.targetRow = row;
+
+            for (PlayerState& player : players_) {
+                if (player.id == incoming.clientId) {
+                    player.moveTargetCol = col;
+                    player.moveTargetRow = row;
+                    break;
+                }
+            }
             break;
         }
         case MessageType::Ping: {
@@ -236,34 +256,45 @@ void GameServer::SimulateTick() {
             continue;
         }
 
-        const PlayerInput& input = clientIt->second.input;
-        float dx = 0.0f;
-        float dy = 0.0f;
-        if (input.up) dy -= 1.0f;
-        if (input.down) dy += 1.0f;
-        if (input.left) dx -= 1.0f;
-        if (input.right) dx += 1.0f;
+        ConnectedClient& client = clientIt->second;
+        bool moving = false;
 
-        if (input.right) {
-            player.facingRight = true;
-        } else if (input.left) {
-            player.facingRight = false;
+        if (client.hasMoveTarget) {
+            const float targetX = CellCenterX(client.targetCol);
+            const float targetY = CellCenterY(client.targetRow);
+            float dx = targetX - player.x;
+            float dy = targetY - player.y;
+            const float dist = std::sqrt(dx * dx + dy * dy);
+            const float step = kPlayerSpeed * kTickDuration;
+            const float arriveDist = step * 0.5f;
+
+            if (dist <= arriveDist) {
+                player.x = targetX;
+                player.y = targetY;
+                client.hasMoveTarget = false;
+                player.moveTargetCol = -1;
+                player.moveTargetRow = -1;
+            } else {
+                dx /= dist;
+                dy /= dist;
+
+                if (dx > 0.01f) {
+                    player.facingRight = true;
+                } else if (dx < -0.01f) {
+                    player.facingRight = false;
+                }
+
+                player.x += dx * step;
+                player.y += dy * step;
+                moving = true;
+            }
         }
 
-        const float length = std::sqrt(dx * dx + dy * dy);
-        if (length > 0.0f) {
-            dx /= length;
-            dy /= length;
-        }
-
-        const PlayerAnim desiredAnim = length > 0.0f ? PlayerAnim::Run : PlayerAnim::Idle;
+        const PlayerAnim desiredAnim = moving ? PlayerAnim::Run : PlayerAnim::Idle;
         if (player.anim != desiredAnim) {
             player.anim = desiredAnim;
             player.animStartTick = tick_;
         }
-
-        player.x += dx * kPlayerSpeed * kTickDuration;
-        player.y += dy * kPlayerSpeed * kTickDuration;
 
         const float margin = kPlayerRadius;
         player.x = std::clamp(player.x, margin, kWorldWidth - margin);

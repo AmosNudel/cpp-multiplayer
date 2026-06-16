@@ -7,20 +7,19 @@
 #include "client/game_client.hpp"
 #include "client/viewport.hpp"
 #include "common/config.hpp"
+#include "common/grid.hpp"
 
 #if defined(PLATFORM_WEB)
 #include <emscripten.h>
 #endif
-
-static net::GameClient gClient;
-static GameViewport gViewport;
-static PlayerSprites gPlayerSprites;
 
 static const char* kIdleSpritePath =
     "assets/player_sprites/Sprites/with_outline/IDLE.png";
 static const char* kRunSpritePath =
     "assets/player_sprites/Sprites/with_outline/RUN.png";
 static const float kPlayerSpriteHeight = 96.0f;
+static const float kWorldScreenOriginX = 80.0f;
+static const float kWorldScreenOriginY = 80.0f;
 
 static std::string ResolveAssetPath(const char* relativePath) {
     const std::string relative = relativePath;
@@ -129,6 +128,7 @@ struct PlayerSprites {
 };
 
 static net::GameClient gClient;
+static GameViewport gViewport;
 static PlayerSprites gPlayerSprites;
 static std::string gStatusText = "Press ENTER to connect";
 static std::string gPlayerName = "Player";
@@ -163,7 +163,7 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
             gStatusText = detail;
             break;
         case net::ClientConnectionState::Joined:
-            gStatusText = "Connected - WASD to move, T to chat";
+            gStatusText = "Connected - click map to move, T to chat";
             gEditingName = false;
             gChatOpen = false;
             gChatInput.clear();
@@ -187,6 +187,110 @@ static bool ConnectToServer() {
     return gClient.ConnectDesktop(endpoint.host, endpoint.port, gPlayerName,
                                   OnConnectionState);
 #endif
+}
+
+static Rectangle CellScreenRect(int col, int row) {
+    return {
+        kWorldScreenOriginX + static_cast<float>(col) * net::kGridCellSize,
+        kWorldScreenOriginY + static_cast<float>(row) * net::kGridCellSize,
+        net::kGridCellSize,
+        net::kGridCellSize,
+    };
+}
+
+static bool TryGetWorldCellFromVirtual(Vector2 virtualPos, int& col, int& row) {
+    const float worldX = virtualPos.x - kWorldScreenOriginX;
+    const float worldY = virtualPos.y - kWorldScreenOriginY;
+    if (worldX < 0.0f || worldY < 0.0f || worldX >= net::kWorldWidth ||
+        worldY >= net::kWorldHeight) {
+        return false;
+    }
+
+    col = net::WorldToCellCol(worldX);
+    row = net::WorldToCellRow(worldY);
+    return net::IsValidCell(col, row);
+}
+
+static bool IsMouseOverChatPanel(Vector2 virtualPos) {
+    if (gEditingName) {
+        return false;
+    }
+
+    const Rectangle panel = {
+        20.0f,
+        static_cast<float>(GameViewport::kVirtualHeight - 190),
+        420.0f,
+        170.0f,
+    };
+    return CheckCollisionPointRec(virtualPos, panel);
+}
+
+static void HandleMapClick() {
+    const Vector2 screenPos = GetMousePosition();
+    if (!gViewport.ContainsScreenPoint(screenPos)) {
+        return;
+    }
+
+    const Vector2 virtualPos = gViewport.ScreenToVirtual(screenPos);
+    if (IsMouseOverChatPanel(virtualPos)) {
+        return;
+    }
+
+    int col = 0;
+    int row = 0;
+    if (!TryGetWorldCellFromVirtual(virtualPos, col, row)) {
+        return;
+    }
+
+    gClient.SendMoveRequest(col, row);
+}
+
+static void DrawGrid() {
+    const int originX = static_cast<int>(kWorldScreenOriginX);
+    const int originY = static_cast<int>(kWorldScreenOriginY);
+    const int worldW = static_cast<int>(net::kWorldWidth);
+    const int worldH = static_cast<int>(net::kWorldHeight);
+    const Color gridColor = Color{52, 58, 72, 255};
+
+    for (int col = 0; col <= net::kGridCols; ++col) {
+        const int x = originX + col * static_cast<int>(net::kGridCellSize);
+        DrawLine(x, originY, x, originY + worldH, gridColor);
+    }
+
+    for (int row = 0; row <= net::kGridRows; ++row) {
+        const int y = originY + row * static_cast<int>(net::kGridCellSize);
+        DrawLine(originX, y, originX + worldW, y, gridColor);
+    }
+}
+
+static void DrawGridHighlights() {
+    if (gEditingName || gChatOpen) {
+        return;
+    }
+
+    const Vector2 screenPos = GetMousePosition();
+    if (!gViewport.ContainsScreenPoint(screenPos)) {
+        return;
+    }
+
+    const Vector2 virtualPos = gViewport.ScreenToVirtual(screenPos);
+    int hoverCol = 0;
+    int hoverRow = 0;
+    if (!IsMouseOverChatPanel(virtualPos) &&
+        TryGetWorldCellFromVirtual(virtualPos, hoverCol, hoverRow)) {
+        DrawRectangleRec(CellScreenRect(hoverCol, hoverRow), Color{90, 100, 130, 60});
+    }
+
+    for (const net::PlayerState& player : gClient.GetPlayers()) {
+        if (player.moveTargetCol < 0 || player.moveTargetRow < 0) {
+            continue;
+        }
+
+        const bool isLocal = player.id == gClient.GetLocalPlayerId();
+        const Color tint = isLocal ? Color{120, 180, 255, 80}
+                                   : Color{180, 180, 180, 50};
+        DrawRectangleRec(CellScreenRect(player.moveTargetCol, player.moveTargetRow), tint);
+    }
 }
 
 static void HandleChatInput() {
@@ -257,12 +361,9 @@ static void UpdateGame() {
         return;
     }
 
-    net::PlayerInput input;
-    input.up = IsKeyDown(KEY_W) || IsKeyDown(KEY_UP);
-    input.down = IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN);
-    input.left = IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT);
-    input.right = IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT);
-    gClient.SendInput(input);
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        HandleMapClick();
+    }
 }
 
 static void DrawChatPanel() {
@@ -297,10 +398,16 @@ static void DrawChatPanel() {
 static void DrawGame() {
     gViewport.BeginFrame();
 
-    DrawRectangle(80, 80, static_cast<int>(net::kWorldWidth), static_cast<int>(net::kWorldHeight),
+    DrawRectangle(static_cast<int>(kWorldScreenOriginX),
+                  static_cast<int>(kWorldScreenOriginY),
+                  static_cast<int>(net::kWorldWidth), static_cast<int>(net::kWorldHeight),
                   Color{36, 40, 50, 255});
-    DrawRectangleLines(80, 80, static_cast<int>(net::kWorldWidth),
+    DrawGrid();
+    DrawRectangleLines(static_cast<int>(kWorldScreenOriginX),
+                       static_cast<int>(kWorldScreenOriginY),
+                       static_cast<int>(net::kWorldWidth),
                        static_cast<int>(net::kWorldHeight), Color{70, 76, 92, 255});
+    DrawGridHighlights();
 
     const float nameOffsetY = gPlayerSprites.AnyLoaded()
                                   ? kPlayerSpriteHeight * 0.5f + 8.0f
@@ -310,8 +417,8 @@ static void DrawGame() {
         const bool isLocal = player.id == gClient.GetLocalPlayerId();
         const Color color = isLocal ? gLocalColor : ColorForPlayer(player.id);
         const Vector2 center = {
-            80.0f + player.x,
-            80.0f + player.y,
+            kWorldScreenOriginX + player.x,
+            kWorldScreenOriginY + player.y,
         };
 
         gPlayerSprites.Draw(player, gClient.GetServerTick(), center, color);

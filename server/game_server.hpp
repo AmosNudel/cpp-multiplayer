@@ -23,8 +23,10 @@ struct ConnectedClient {
     int id = 0;
     TransportKind transport = TransportKind::Tcp;
     std::string name;
-    PlayerInput input;
     bool hasJoined = false;
+    bool hasMoveTarget = false;
+    int targetCol = 0;
+    int targetRow = 0;
 };
 
 class GameServer {
