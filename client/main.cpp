@@ -36,6 +36,7 @@ static const char* kJumpSpritePath =
 static const char* kGoblinIdleSpritePath = "assets/enemy/Goblin/Idle.png";
 static const char* kGoblinRunSpritePath = "assets/enemy/Goblin/Run.png";
 static const char* kGoblinAttackSpritePath = "assets/enemy/Goblin/Attack.png";
+static const char* kGoblinDeathSpritePath = "assets/enemy/Goblin/Death.png";
 static const float kPlayerSpriteHeight = 96.0f;
 static constexpr float kGridScreenBottom = WorldView::kGridVirtualY + net::kWorldHeight;
 
@@ -174,18 +175,21 @@ struct GoblinSprites {
     SpriteSheet idle;
     SpriteSheet run;
     SpriteSheet attack;
+    SpriteSheet death;
 
     void Load() {
         idle.Load(ResolveAssetPath(kGoblinIdleSpritePath).c_str(), net::kGoblinIdleFrameCount);
         run.Load(ResolveAssetPath(kGoblinRunSpritePath).c_str(), net::kRunFrameCount);
         attack.Load(ResolveAssetPath(kGoblinAttackSpritePath).c_str(),
                     net::kGoblinAttackFrameCount);
+        death.Load(ResolveAssetPath(kGoblinDeathSpritePath).c_str(), net::kGoblinDeathFrameCount);
     }
 
     void Unload() {
         idle.Unload();
         run.Unload();
         attack.Unload();
+        death.Unload();
     }
 
     bool Loaded() const { return idle.loaded; }
@@ -194,6 +198,7 @@ struct GoblinSprites {
         switch (anim) {
             case net::PlayerAnim::Attack1: return attack.loaded ? &attack : nullptr;
             case net::PlayerAnim::Run: return run.loaded ? &run : nullptr;
+            case net::PlayerAnim::Dead: return death.loaded ? &death : nullptr;
             case net::PlayerAnim::Idle:
             default: return idle.loaded ? &idle : nullptr;
         }
@@ -201,9 +206,7 @@ struct GoblinSprites {
 
     void Draw(const net::EnemyState& enemy, uint32_t serverTick, Vector2 center) const {
         Color tint = WHITE;
-        if (enemy.state == net::EntityState::Dead) {
-            tint = Color{80, 80, 80, 160};
-        } else if (enemy.state == net::EntityState::Hit) {
+        if (enemy.state == net::EntityState::Hit) {
             tint = Color{255, 160, 160, 255};
         }
 

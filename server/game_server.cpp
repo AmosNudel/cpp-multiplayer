@@ -1043,6 +1043,22 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
     }
 }
 
+void RemoveExpiredEnemyCorpses(std::vector<EnemyState>& enemies,
+                               std::unordered_map<int, EnemyMovementState>& enemyMovement,
+                               uint32_t tick) {
+    enemies.erase(
+        std::remove_if(enemies.begin(), enemies.end(),
+                       [&](const EnemyState& enemy) {
+                           if (enemy.state != EntityState::Dead ||
+                               tick - enemy.stateStartTick < kGoblinCorpseLifetimeTicks) {
+                               return false;
+                           }
+                           enemyMovement.erase(enemy.id);
+                           return true;
+                       }),
+        enemies.end());
+}
+
 void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
                        std::vector<PlayerState>& players,
                        std::unordered_map<int, ConnectedClient>& clients,
@@ -1514,6 +1530,8 @@ void GameServer::SimulateTick() {
         UpdateEnemyEntity(enemy, enemyMovement_[enemy.id], players_, clients_, enemies_,
                           DefaultGridMap(), tick_);
     }
+
+    RemoveExpiredEnemyCorpses(enemies_, enemyMovement_, tick_);
 }
 
 void GameServer::BroadcastWorldState() {

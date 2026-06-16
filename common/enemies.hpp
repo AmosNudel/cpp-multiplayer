@@ -16,6 +16,9 @@ inline constexpr int kGoblinIdleAnimTicksPerFrame = 3;
 inline constexpr int kGoblinAttackFrameCount = 8;
 inline constexpr int kGoblinAttackDamageFrame = 6;
 inline constexpr int kGoblinAttackAnimTicksPerFrame = 2;
+inline constexpr int kGoblinDeathFrameCount = 4;
+inline constexpr int kGoblinDeathAnimTicksPerFrame = 3;
+inline constexpr int kGoblinCorpseLifetimeTicks = 60;
 inline constexpr float kGoblinSpriteHeight = 128.0f;
 inline constexpr int kDefaultGoblinCol = 7;
 inline constexpr int kDefaultGoblinRow = 7;
@@ -60,6 +63,7 @@ inline int GoblinAnimFrameCount(PlayerAnim anim) {
     switch (anim) {
         case PlayerAnim::Attack1: return kGoblinAttackFrameCount;
         case PlayerAnim::Run: return kRunFrameCount;
+        case PlayerAnim::Dead: return kGoblinDeathFrameCount;
         case PlayerAnim::Idle:
         default: return kGoblinIdleFrameCount;
     }
@@ -69,6 +73,7 @@ inline int GoblinAnimTicksPerFrame(PlayerAnim anim) {
     switch (anim) {
         case PlayerAnim::Attack1: return kGoblinAttackAnimTicksPerFrame;
         case PlayerAnim::Run: return kRunAnimTicksPerFrame;
+        case PlayerAnim::Dead: return kGoblinDeathAnimTicksPerFrame;
         case PlayerAnim::Idle:
         default: return kGoblinIdleAnimTicksPerFrame;
     }
@@ -87,7 +92,7 @@ inline int GoblinAnimFrameIndex(PlayerAnim anim, uint32_t serverTick, uint32_t a
     }
 
     const int frame = static_cast<int>(elapsed / static_cast<uint32_t>(ticksPerFrame));
-    if (anim == PlayerAnim::Attack1) {
+    if (anim == PlayerAnim::Attack1 || anim == PlayerAnim::Dead) {
         return frame >= frameCount ? frameCount - 1 : frame;
     }
 
