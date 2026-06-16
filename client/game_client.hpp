@@ -34,6 +34,7 @@ public:
     ClientConnectionState GetState() const { return state_; }
     int GetLocalPlayerId() const { return localPlayerId_; }
     const std::vector<PlayerState>& GetPlayers() const { return players_; }
+    const std::vector<EnemyState>& GetEnemies() const { return enemies_; }
     const std::vector<ChatMessage>& GetChatLog() const { return chatLog_; }
     uint32_t GetServerTick() const { return serverTick_; }
     int GetPingMs() const { return pingMs_; }
@@ -50,6 +51,7 @@ private:
     std::string playerName_;
     int localPlayerId_ = 0;
     std::vector<PlayerState> players_;
+    std::vector<EnemyState> enemies_;
     std::vector<ChatMessage> chatLog_;
     uint32_t serverTick_ = 0;
     int pingMs_ = 0;

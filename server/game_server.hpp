@@ -71,6 +71,7 @@ private:
     std::unordered_map<int, ConnectedClient> clients_;
     std::unordered_map<int, TransportKind> transportByClientId_;
     std::vector<PlayerState> players_;
+    std::vector<EnemyState> enemies_;
     std::vector<ChatMessage> chatHistory_;
     uint32_t tick_ = 0;
     bool running_ = false;

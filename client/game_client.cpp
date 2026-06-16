@@ -63,6 +63,7 @@ void GameClient::Disconnect() {
     wsClient_.Disconnect();
     localPlayerId_ = 0;
     players_.clear();
+    enemies_.clear();
     chatLog_.clear();
     serverTick_ = 0;
     pingMs_ = 0;
@@ -98,6 +99,7 @@ void GameClient::Update() {
         wsClient_.Disconnect();
         localPlayerId_ = 0;
         players_.clear();
+        enemies_.clear();
         chatLog_.clear();
         serverTick_ = 0;
         pingMs_ = 0;
@@ -158,6 +160,7 @@ void GameClient::HandleMessage(const Message& message) {
         case MessageType::JoinAccepted:
             localPlayerId_ = message.joinAccepted.playerId;
             players_ = message.joinAccepted.players;
+            enemies_ = message.joinAccepted.enemies;
             chatLog_.clear();
             SetState(ClientConnectionState::Joined, "Joined game");
             break;
@@ -169,6 +172,7 @@ void GameClient::HandleMessage(const Message& message) {
         case MessageType::WorldState:
             serverTick_ = message.worldState.tick;
             players_ = message.worldState.players;
+            enemies_ = message.worldState.enemies;
             break;
         case MessageType::PlayerLeft:
             players_.erase(

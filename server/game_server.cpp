@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "common/config.hpp"
+#include "common/enemies.hpp"
 #include "common/grid.hpp"
 #include "common/grid_map.hpp"
 #include "common/pathfinding.hpp"
@@ -76,6 +77,10 @@ bool GameServer::Start(uint16_t tcpPort, uint16_t wsPort) {
     }
 
     running_ = true;
+    enemies_ = CreateDefaultEnemies();
+    for (EnemyState& enemy : enemies_) {
+        enemy.animStartTick = tick_;
+    }
     return true;
 }
 
@@ -86,6 +91,7 @@ void GameServer::Stop() {
     clients_.clear();
     transportByClientId_.clear();
     players_.clear();
+    enemies_.clear();
     chatHistory_.clear();
 }
 
@@ -201,7 +207,7 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             players_.push_back(player);
 
             SendToClient(incoming.clientId, incoming.transport,
-                         MakeJoinAccepted(incoming.clientId, BuildPlayerSnapshot()));
+                         MakeJoinAccepted(incoming.clientId, BuildPlayerSnapshot(), enemies_));
             if (!chatHistory_.empty()) {
                 SendToClient(incoming.clientId, incoming.transport,
                              MakeChatHistory(chatHistory_));
@@ -388,7 +394,7 @@ void GameServer::SimulateTick() {
 }
 
 void GameServer::BroadcastWorldState() {
-    BroadcastToAll(MakeWorldState(tick_, players_));
+    BroadcastToAll(MakeWorldState(tick_, players_, enemies_));
 }
 
 void GameServer::RecordAndBroadcastChat(const ChatMessage& entry) {

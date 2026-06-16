@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "common/config.hpp"
+#include "common/enemies.hpp"
 
 namespace net {
 
@@ -48,6 +49,7 @@ struct JoinRequest {
 struct JoinAccepted {
     int playerId = 0;
     std::vector<PlayerState> players;
+    std::vector<EnemyState> enemies;
 };
 
 struct JoinRejected {
@@ -61,6 +63,7 @@ struct PlayerLeft {
 struct WorldState {
     uint32_t tick = 0;
     std::vector<PlayerState> players;
+    std::vector<EnemyState> enemies;
 };
 
 struct PingMessage {
@@ -100,10 +103,12 @@ const char* MessageTypeName(MessageType type);
 MessageType ParseMessageType(const std::string& value);
 
 Message MakeJoinRequest(const std::string& name);
-Message MakeJoinAccepted(int playerId, const std::vector<PlayerState>& players);
+Message MakeJoinAccepted(int playerId, const std::vector<PlayerState>& players,
+                         const std::vector<EnemyState>& enemies);
 Message MakeJoinRejected(const std::string& reason);
 Message MakeMoveRequest(int col, int row);
-Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players);
+Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players,
+                       const std::vector<EnemyState>& enemies);
 Message MakePlayerLeft(int playerId);
 Message MakePing(uint32_t clientTimeMs);
 Message MakePong(uint32_t clientTimeMs, uint32_t serverTimeMs);

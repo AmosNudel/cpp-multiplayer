@@ -7,6 +7,7 @@
 #include "client/game_client.hpp"
 #include "client/viewport.hpp"
 #include "common/config.hpp"
+#include "common/enemies.hpp"
 #include "common/grid.hpp"
 #include "common/grid_map.hpp"
 
@@ -18,6 +19,7 @@ static const char* kIdleSpritePath =
     "assets/player_sprites/Sprites/with_outline/IDLE.png";
 static const char* kRunSpritePath =
     "assets/player_sprites/Sprites/with_outline/RUN.png";
+static const char* kGoblinIdleSpritePath = "assets/enemy/Goblin/Idle.png";
 static const float kPlayerSpriteHeight = 96.0f;
 static constexpr int kSidePadding = 80;
 static constexpr float kWorldScreenOriginX = static_cast<float>(kSidePadding);
@@ -131,9 +133,33 @@ struct PlayerSprites {
     }
 };
 
+struct GoblinSprites {
+    SpriteSheet idle;
+
+    void Load() {
+        idle.Load(ResolveAssetPath(kGoblinIdleSpritePath).c_str(), net::kGoblinIdleFrameCount);
+    }
+
+    void Unload() { idle.Unload(); }
+
+    bool Loaded() const { return idle.loaded; }
+
+    void Draw(const net::EnemyState& enemy, uint32_t serverTick, Vector2 center) const {
+        if (!idle.loaded) {
+            DrawCircleV(center, net::kPlayerRadius, Color{120, 200, 80, 255});
+            return;
+        }
+
+        const int frame =
+            net::GoblinAnimFrameIndex(enemy.anim, serverTick, enemy.animStartTick);
+        idle.Draw(center, WHITE, frame, enemy.facingRight);
+    }
+};
+
 static net::GameClient gClient;
 static GameViewport gViewport;
 static PlayerSprites gPlayerSprites;
+static GoblinSprites gGoblinSprites;
 static std::string gStatusText = "Press ENTER to connect";
 static std::string gPlayerName = "Player";
 static std::string gChatInput;
@@ -639,6 +665,23 @@ static void DrawPlayer(const net::PlayerState& player, Color color, float nameOf
              16, RAYWHITE);
 }
 
+static void DrawEnemy(const net::EnemyState& enemy) {
+    const Vector2 center = {
+        kWorldScreenOriginX + enemy.x,
+        kWorldScreenOriginY + enemy.y,
+    };
+
+    gGoblinSprites.Draw(enemy, gClient.GetServerTick(), center);
+}
+
+static void DrawEnemies() {
+    for (const net::EnemyState& enemy : gClient.GetEnemies()) {
+        if (enemy.kind == "goblin") {
+            DrawEnemy(enemy);
+        }
+    }
+}
+
 static void DrawGame() {
     gViewport.BeginFrame();
 
@@ -655,6 +698,7 @@ static void DrawGame() {
                        static_cast<int>(net::kWorldWidth),
                        static_cast<int>(net::kWorldHeight), Color{70, 76, 92, 255});
     DrawGridHighlights();
+    DrawEnemies();
 
     const float nameOffsetY = gPlayerSprites.AnyLoaded()
                                   ? kPlayerSpriteHeight * 0.5f + 8.0f
@@ -714,7 +758,9 @@ int main() {
     InitGameWindow("Multiplayer Game");
     gViewport.Init();
     gPlayerSprites.Load();
+    gGoblinSprites.Load();
     emscripten_set_main_loop(MainLoop, 0, 1);
+    gGoblinSprites.Unload();
     gPlayerSprites.Unload();
     gViewport.Shutdown();
     CloseWindow();
@@ -725,6 +771,7 @@ int main() {
     InitGameWindow("Multiplayer Game");
     gViewport.Init();
     gPlayerSprites.Load();
+    gGoblinSprites.Load();
 
     while (!WindowShouldClose()) {
         UpdateGame();
@@ -732,6 +779,7 @@ int main() {
     }
 
     gClient.Disconnect();
+    gGoblinSprites.Unload();
     gPlayerSprites.Unload();
     gViewport.Shutdown();
     CloseWindow();

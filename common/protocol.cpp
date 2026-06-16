@@ -38,6 +38,30 @@ PlayerState PlayerStateFromJson(const nlohmann::json& json) {
     return player;
 }
 
+nlohmann::json EnemyStateToJson(const EnemyState& enemy) {
+    return {
+        {"id", enemy.id},
+        {"kind", enemy.kind},
+        {"x", enemy.x},
+        {"y", enemy.y},
+        {"anim", PlayerAnimName(enemy.anim)},
+        {"anim_start_tick", enemy.animStartTick},
+        {"facing_right", enemy.facingRight},
+    };
+}
+
+EnemyState EnemyStateFromJson(const nlohmann::json& json) {
+    EnemyState enemy;
+    enemy.id = json.at("id").get<int>();
+    enemy.kind = json.value("kind", "goblin");
+    enemy.x = json.at("x").get<float>();
+    enemy.y = json.at("y").get<float>();
+    enemy.anim = ParsePlayerAnim(json.value("anim", "idle"));
+    enemy.animStartTick = json.value("anim_start_tick", 0u);
+    enemy.facingRight = json.value("facing_right", true);
+    return enemy;
+}
+
 nlohmann::json ChatMessageToJson(const ChatMessage& chat) {
     nlohmann::json json;
     if (chat.playerId != 0) {
@@ -97,11 +121,13 @@ Message MakeJoinRequest(const std::string& name) {
     return message;
 }
 
-Message MakeJoinAccepted(int playerId, const std::vector<PlayerState>& players) {
+Message MakeJoinAccepted(int playerId, const std::vector<PlayerState>& players,
+                         const std::vector<EnemyState>& enemies) {
     Message message;
     message.type = MessageType::JoinAccepted;
     message.joinAccepted.playerId = playerId;
     message.joinAccepted.players = players;
+    message.joinAccepted.enemies = enemies;
     return message;
 }
 
@@ -120,11 +146,13 @@ Message MakeMoveRequest(int col, int row) {
     return message;
 }
 
-Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players) {
+Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players,
+                       const std::vector<EnemyState>& enemies) {
     Message message;
     message.type = MessageType::WorldState;
     message.worldState.tick = tick;
     message.worldState.players = players;
+    message.worldState.enemies = enemies;
     return message;
 }
 
@@ -187,6 +215,10 @@ std::string SerializeMessage(const Message& message) {
             for (const PlayerState& player : message.joinAccepted.players) {
                 json["players"].push_back(PlayerStateToJson(player));
             }
+            json["enemies"] = nlohmann::json::array();
+            for (const EnemyState& enemy : message.joinAccepted.enemies) {
+                json["enemies"].push_back(EnemyStateToJson(enemy));
+            }
             break;
         case MessageType::JoinRejected:
             json["reason"] = message.joinRejected.reason;
@@ -200,6 +232,10 @@ std::string SerializeMessage(const Message& message) {
             json["players"] = nlohmann::json::array();
             for (const PlayerState& player : message.worldState.players) {
                 json["players"].push_back(PlayerStateToJson(player));
+            }
+            json["enemies"] = nlohmann::json::array();
+            for (const EnemyState& enemy : message.worldState.enemies) {
+                json["enemies"].push_back(EnemyStateToJson(enemy));
             }
             break;
         case MessageType::PlayerLeft:
@@ -242,6 +278,11 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
                 for (const auto& playerJson : json.at("players")) {
                     message.joinAccepted.players.push_back(PlayerStateFromJson(playerJson));
                 }
+                if (json.contains("enemies")) {
+                    for (const auto& enemyJson : json.at("enemies")) {
+                        message.joinAccepted.enemies.push_back(EnemyStateFromJson(enemyJson));
+                    }
+                }
                 break;
             case MessageType::JoinRejected:
                 message.joinRejected.reason = json.at("reason").get<std::string>();
@@ -254,6 +295,11 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
                 message.worldState.tick = json.at("tick").get<uint32_t>();
                 for (const auto& playerJson : json.at("players")) {
                     message.worldState.players.push_back(PlayerStateFromJson(playerJson));
+                }
+                if (json.contains("enemies")) {
+                    for (const auto& enemyJson : json.at("enemies")) {
+                        message.worldState.enemies.push_back(EnemyStateFromJson(enemyJson));
+                    }
                 }
                 break;
             case MessageType::PlayerLeft:
