@@ -255,6 +255,10 @@ void ClearPlayerMove(ConnectedClient& client, PlayerState& player) {
     player.moveTargetRow = -1;
 }
 
+bool IsVoluntaryMove(const ConnectedClient& client, const PlayerState& player) {
+    return client.hasMoveTarget && client.pendingAttackEnemyId < 0 && player.targetId < 0;
+}
+
 bool StartPlayerPath(ConnectedClient& client, PlayerState& player, const GridMap& map,
                      int goalCol, int goalRow, uint32_t tick) {
     const int startCol = WorldToCellCol(player.x);
@@ -400,6 +404,10 @@ bool TryBeginGoblinCombat(EnemyState& enemy, PlayerState& player,
         return false;
     }
 
+    if (IsVoluntaryMove(*client, player)) {
+        return false;
+    }
+
     EndPlayerCombat(player, enemies, tick);
     ClearPlayerMove(*client, player);
     client->pendingAttackEnemyId = -1;
@@ -496,6 +504,19 @@ bool TryPathToCombatTarget(PlayerState& player, ConnectedClient& client, const E
 
 void RecoverPlayerAfterHit(PlayerState& player, ConnectedClient& client,
                            std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
+    if (IsVoluntaryMove(client, player)) {
+        if (player.hp <= 0) {
+            TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                             EntityState::Dead, tick);
+            ClearPlayerMove(client, player);
+            return;
+        }
+
+        TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                         EntityState::Moving, tick);
+        return;
+    }
+
     if (player.targetId < 0) {
         TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
                          EntityState::Idle, tick);
@@ -566,7 +587,7 @@ void TryApplyComboSwingDamage(PlayerState& player, ConnectedClient& client, Enem
 
 void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
                        std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
-    if (client.hasMoveTarget) {
+    if (IsVoluntaryMove(client, player)) {
         return;
     }
 
@@ -815,6 +836,43 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
                         std::vector<EnemyState>& enemies, uint32_t tick) {
     if (player.state == EntityState::Dead) {
         ClearPlayerMove(client, player);
+        return;
+    }
+
+    if (IsVoluntaryMove(client, player)) {
+        if (player.state == EntityState::Combat) {
+            EndPlayerCombat(player, enemies, tick);
+        }
+
+        const CombatStats& stats = DefaultEntityRegistry().StatsFor(kPlayerEntityId);
+        const bool hitStunActive =
+            player.state == EntityState::Hit &&
+            tick - player.stateStartTick < static_cast<uint32_t>(stats.hitStunTicks);
+
+        if (hitStunActive) {
+            return;
+        }
+
+        if (player.state == EntityState::Hit) {
+            if (player.hp <= 0) {
+                TransitionEntity(player.state, player.stateStartTick, player.anim,
+                                 player.animStartTick, EntityState::Dead, tick);
+                ClearPlayerMove(client, player);
+                return;
+            }
+
+            TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                             EntityState::Moving, tick);
+        } else if (player.state != EntityState::Moving) {
+            TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                             EntityState::Moving, tick);
+        }
+
+        StepPlayerMovement(player, client, tick);
+        if (!client.hasMoveTarget && player.state == EntityState::Moving) {
+            TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                             EntityState::Idle, tick);
+        }
         return;
     }
 
