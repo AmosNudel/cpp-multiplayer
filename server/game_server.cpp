@@ -167,13 +167,28 @@ void StartPlayerComboPhase(PlayerState& player, ConnectedClient& client, PlayerC
     SetEntityAnim(player.anim, player.animStartTick, anim, tick);
 }
 
+PlayerAnim AnimForComboPhase(PlayerComboPhase phase) {
+    switch (phase) {
+        case PlayerComboPhase::Attack1: return PlayerAnim::Attack1;
+        case PlayerComboPhase::Attack2: return PlayerAnim::Attack2;
+        case PlayerComboPhase::Attack3: return PlayerAnim::Attack3;
+        case PlayerComboPhase::PauseAfter1:
+        case PlayerComboPhase::PauseAfter2: return PlayerAnim::Idle;
+        case PlayerComboPhase::None:
+        default: return PlayerAnim::Idle;
+    }
+}
+
+bool IsComboAttackPhase(PlayerComboPhase phase) {
+    return phase == PlayerComboPhase::Attack1 || phase == PlayerComboPhase::Attack2 ||
+           phase == PlayerComboPhase::Attack3;
+}
+
 void BeginCombat(PlayerState& player, EnemyState& enemy, ConnectedClient& client, uint32_t tick) {
     player.targetId = enemy.id;
     enemy.targetId = player.id;
-    TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
-                     EntityState::Combat, tick);
-    TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
-                     EntityState::Combat, tick);
+    TransitionEntityState(player.state, player.stateStartTick, EntityState::Combat, tick);
+    TransitionEntityState(enemy.state, enemy.stateStartTick, EntityState::Combat, tick);
     UpdateFacingFromDirection(player, enemy.x - player.x, enemy.y - player.y);
     UpdateEnemyFacing(enemy, player.x - enemy.x, player.y - enemy.y);
     StartPlayerComboPhase(player, client, PlayerComboPhase::Attack1, PlayerAnim::Attack1, tick);
@@ -223,16 +238,18 @@ void ApplyDamageToPlayer(PlayerState& player, int damage, uint32_t tick) {
 
 void TryApplyComboSwingDamage(PlayerState& player, ConnectedClient& client, EnemyState& enemy,
                               uint32_t tick) {
-    if (!IsAttackAnim(player.anim) || client.comboSwingDamageDealt) {
+    if (!IsComboAttackPhase(client.comboPhase) || client.comboSwingDamageDealt) {
         return;
     }
 
-    const int damageFrame = AttackDamageFrame(player.anim);
+    const PlayerAnim attackAnim = AnimForComboPhase(client.comboPhase);
+    const int damageFrame = AttackDamageFrame(attackAnim);
     if (damageFrame < 0) {
         return;
     }
 
-    const int currentFrame = CurrentAnimFrame(player.anim, tick, player.animStartTick);
+    const int currentFrame =
+        CurrentAnimFrame(attackAnim, tick, client.comboPhaseStartTick);
     if (currentFrame != damageFrame) {
         return;
     }
@@ -249,6 +266,8 @@ void TryApplyComboSwingDamage(PlayerState& player, ConnectedClient& client, Enem
 
 void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
                        std::vector<EnemyState>& enemies, uint32_t tick) {
+    ClearPlayerMove(client, player);
+
     EnemyState* enemy = FindEnemy(enemies, player.targetId);
     if (enemy == nullptr || !IsAlive(enemy->state) ||
         !IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
@@ -265,7 +284,7 @@ void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
 
     switch (client.comboPhase) {
         case PlayerComboPhase::Attack1:
-            if (IsAnimFinished(PlayerAnim::Attack1, tick, player.animStartTick)) {
+            if (IsAnimFinished(PlayerAnim::Attack1, tick, client.comboPhaseStartTick)) {
                 StartPlayerComboPhase(player, client, PlayerComboPhase::PauseAfter1,
                                       PlayerAnim::Idle, tick);
             }
@@ -277,7 +296,7 @@ void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
             }
             break;
         case PlayerComboPhase::Attack2:
-            if (IsAnimFinished(PlayerAnim::Attack2, tick, player.animStartTick)) {
+            if (IsAnimFinished(PlayerAnim::Attack2, tick, client.comboPhaseStartTick)) {
                 StartPlayerComboPhase(player, client, PlayerComboPhase::PauseAfter2,
                                       PlayerAnim::Idle, tick);
             }
@@ -289,7 +308,7 @@ void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
             }
             break;
         case PlayerComboPhase::Attack3:
-            if (IsAnimFinished(PlayerAnim::Attack3, tick, player.animStartTick)) {
+            if (IsAnimFinished(PlayerAnim::Attack3, tick, client.comboPhaseStartTick)) {
                 StartPlayerComboPhase(player, client, PlayerComboPhase::Attack1,
                                       PlayerAnim::Attack1, tick);
             }
@@ -301,13 +320,18 @@ void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
     }
 }
 
-bool TryPerformEnemyAttack(EnemyState& enemy, std::vector<PlayerState>& players, uint32_t tick) {
+bool TryPerformEnemyAttack(EnemyState& enemy, std::vector<PlayerState>& players,
+                           std::unordered_map<int, ConnectedClient>& clients, uint32_t tick) {
     if (enemy.state != EntityState::Combat || enemy.targetId < 0) {
         return false;
     }
 
     const PlayerState* player = FindPlayerConst(players, enemy.targetId);
     if (player == nullptr || !IsAlive(player->state) || player->state == EntityState::Hit) {
+        return false;
+    }
+
+    if (player->state == EntityState::Combat && IsAttackAnim(player->anim)) {
         return false;
     }
 
@@ -324,6 +348,11 @@ bool TryPerformEnemyAttack(EnemyState& enemy, std::vector<PlayerState>& players,
     SetEntityAnim(enemy.anim, enemy.animStartTick, PlayerAnim::Attack1, tick);
 
     if (PlayerState* mutablePlayer = FindPlayer(players, enemy.targetId)) {
+        if (mutablePlayer->state == EntityState::Combat) {
+            if (auto clientIt = clients.find(enemy.targetId); clientIt != clients.end()) {
+                ResetPlayerCombo(clientIt->second);
+            }
+        }
         ApplyDamageToPlayer(*mutablePlayer, kGoblinAttackDamage, tick);
     }
     return true;
@@ -419,7 +448,6 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
     }
 
     if (player.state == EntityState::Hit) {
-        ResetPlayerCombo(client);
         ClearPlayerMove(client, player);
         if (tick - player.stateStartTick >= static_cast<uint32_t>(kHitStunTicks)) {
             if (player.hp <= 0) {
@@ -429,8 +457,8 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
                 EnemyState* enemy = FindEnemy(enemies, player.targetId);
                 if (enemy != nullptr && IsAlive(enemy->state) &&
                     IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
-                    TransitionEntity(player.state, player.stateStartTick, player.anim,
-                                     player.animStartTick, EntityState::Combat, tick);
+                    TransitionEntityState(player.state, player.stateStartTick, EntityState::Combat,
+                                          tick);
                     StartPlayerComboPhase(player, client, PlayerComboPhase::Attack1,
                                           PlayerAnim::Attack1, tick);
                 } else {
@@ -455,16 +483,15 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
                                  player.animStartTick, EntityState::Idle, tick);
             }
         }
-        return;
     }
 
     if (player.state == EntityState::Combat) {
         UpdatePlayerCombo(player, client, enemies, tick);
-        return;
     }
 }
 
-void UpdateEnemyEntity(EnemyState& enemy, std::vector<PlayerState>& players, uint32_t tick) {
+void UpdateEnemyEntity(EnemyState& enemy, std::vector<PlayerState>& players,
+                       std::unordered_map<int, ConnectedClient>& clients, uint32_t tick) {
     if (enemy.state == EntityState::Dead) {
         return;
     }
@@ -503,7 +530,7 @@ void UpdateEnemyEntity(EnemyState& enemy, std::vector<PlayerState>& players, uin
             return;
         }
 
-        TryPerformEnemyAttack(enemy, players, tick);
+        TryPerformEnemyAttack(enemy, players, clients, tick);
     }
 }
 
@@ -842,7 +869,7 @@ void GameServer::SimulateTick() {
     }
 
     for (EnemyState& enemy : enemies_) {
-        UpdateEnemyEntity(enemy, players_, tick_);
+        UpdateEnemyEntity(enemy, players_, clients_, tick_);
     }
 }
 

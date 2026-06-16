@@ -22,6 +22,9 @@ std::optional<GridPoint> FindBestAdjacentApproachTile(const GridMap& map, int st
 void TransitionEntity(EntityState& state, uint32_t& stateStartTick, PlayerAnim& anim,
                       uint32_t& animStartTick, EntityState newState, uint32_t tick);
 
+void TransitionEntityState(EntityState& state, uint32_t& stateStartTick, EntityState newState,
+                           uint32_t tick);
+
 void SetEntityAnim(PlayerAnim& anim, uint32_t& animStartTick, PlayerAnim newAnim,
                    uint32_t tick);
 

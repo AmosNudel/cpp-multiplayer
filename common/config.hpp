@@ -124,8 +124,12 @@ inline int AnimFrameIndex(PlayerAnim anim, uint32_t serverTick, uint32_t animSta
         return 0;
     }
 
-    return static_cast<int>((elapsed / static_cast<uint32_t>(ticksPerFrame)) %
-                            static_cast<uint32_t>(frameCount));
+    const int frame = static_cast<int>(elapsed / static_cast<uint32_t>(ticksPerFrame));
+    if (IsAttackAnim(anim) || anim == PlayerAnim::Hit || anim == PlayerAnim::Dead) {
+        return frame >= frameCount ? frameCount - 1 : frame;
+    }
+
+    return static_cast<int>(frame % static_cast<uint32_t>(frameCount));
 }
 inline constexpr int kMaxChatHistory = 8;
 inline constexpr int kServerChatPlayerId = 0;
