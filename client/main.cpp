@@ -5,14 +5,16 @@
 
 #include "client/connection_config.hpp"
 #include "client/game_client.hpp"
+#include "client/viewport.hpp"
 #include "common/config.hpp"
 
 #if defined(PLATFORM_WEB)
 #include <emscripten.h>
 #endif
 
-static const int screenWidth = 960;
-static const int screenHeight = 640;
+static net::GameClient gClient;
+static GameViewport gViewport;
+static PlayerSprites gPlayerSprites;
 
 static const char* kIdleSpritePath =
     "assets/player_sprites/Sprites/with_outline/IDLE.png";
@@ -214,7 +216,12 @@ static void HandleChatInput() {
 }
 
 static void UpdateGame() {
+    gViewport.UpdateLayout();
     gClient.Update();
+
+    if (IsKeyPressed(KEY_F11)) {
+        ToggleFullscreen();
+    }
 
     if (gEditingName) {
         int key = GetCharPressed();
@@ -260,7 +267,7 @@ static void UpdateGame() {
 
 static void DrawChatPanel() {
     const int panelX = 20;
-    const int panelY = screenHeight - 190;
+    const int panelY = GameViewport::kVirtualHeight - 190;
     const int panelW = 420;
     const int panelH = 170;
 
@@ -288,8 +295,7 @@ static void DrawChatPanel() {
 }
 
 static void DrawGame() {
-    BeginDrawing();
-    ClearBackground(Color{24, 26, 32, 255});
+    gViewport.BeginFrame();
 
     DrawRectangle(80, 80, static_cast<int>(net::kWorldWidth), static_cast<int>(net::kWorldHeight),
                   Color{36, 40, 50, 255});
@@ -326,11 +332,11 @@ static void DrawGame() {
     } else {
         DrawText(TextFormat("Tick: %u", gClient.GetServerTick()), 20, 100, 18, GRAY);
         DrawText(TextFormat("Ping: %d ms", gClient.GetPingMs()), 20, 124, 18, GRAY);
-        DrawText("ESC = disconnect", 20, 148, 16, GRAY);
+        DrawText("F11 = fullscreen   ESC = disconnect", 20, 148, 16, GRAY);
         DrawChatPanel();
     }
 
-    EndDrawing();
+    gViewport.EndFrame();
 }
 
 #if defined(PLATFORM_WEB)
@@ -340,18 +346,19 @@ static void MainLoop() {
 }
 
 int main() {
-    InitWindow(screenWidth, screenHeight, "Multiplayer Game");
-    SetTargetFPS(60);
+    InitGameWindow("Multiplayer Game");
+    gViewport.Init();
     gPlayerSprites.Load();
     emscripten_set_main_loop(MainLoop, 0, 1);
     gPlayerSprites.Unload();
+    gViewport.Shutdown();
     CloseWindow();
     return 0;
 }
 #else
 int main() {
-    InitWindow(screenWidth, screenHeight, "Multiplayer Game");
-    SetTargetFPS(60);
+    InitGameWindow("Multiplayer Game");
+    gViewport.Init();
     gPlayerSprites.Load();
 
     while (!WindowShouldClose()) {
@@ -361,6 +368,7 @@ int main() {
 
     gClient.Disconnect();
     gPlayerSprites.Unload();
+    gViewport.Shutdown();
     CloseWindow();
     return 0;
 }
