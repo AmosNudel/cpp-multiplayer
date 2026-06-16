@@ -2,7 +2,6 @@
 
 #include <cstdio>
 #include <algorithm>
-#include <limits>
 #include <optional>
 #include <string>
 
@@ -419,32 +418,16 @@ static bool ConnectToServer() {
 #endif
 }
 
-static std::optional<int> TryPickEnemyAtWorld(Vector2 worldPos) {
-    std::optional<int> bestId;
-    float bestDistSq = std::numeric_limits<float>::max();
-
+static std::optional<int> FindEnemyAtCell(int col, int row) {
     for (const net::EnemyState& enemy : gClient.GetEnemies()) {
         if (enemy.state == net::EntityState::Dead) {
             continue;
         }
-
-        const float halfHeight = net::kGoblinSpriteHeight * 0.5f;
-        const float halfWidth = halfHeight * 0.5f;
-        if (worldPos.x < enemy.x - halfWidth || worldPos.x > enemy.x + halfWidth ||
-            worldPos.y < enemy.y - halfHeight || worldPos.y > enemy.y + halfHeight) {
-            continue;
-        }
-
-        const float dx = worldPos.x - enemy.x;
-        const float dy = worldPos.y - enemy.y;
-        const float distSq = dx * dx + dy * dy;
-        if (distSq < bestDistSq) {
-            bestDistSq = distSq;
-            bestId = enemy.id;
+        if (net::WorldToCellCol(enemy.x) == col && net::WorldToCellRow(enemy.y) == row) {
+            return enemy.id;
         }
     }
-
-    return bestId;
+    return std::nullopt;
 }
 
 static void HandleMapClick() {
@@ -474,18 +457,17 @@ static void HandleMapClick() {
         return;
     }
 
-    const Vector2 worldPos = gWorldView.VirtualToWorld(virtualPos);
-    if (const std::optional<int> enemyId = TryPickEnemyAtWorld(worldPos)) {
-        gClient.SendAttackRequest(*enemyId);
-        return;
-    }
-
     int col = 0;
     int row = 0;
     if (!TryGetWorldCellFromVirtual(virtualPos, col, row)) {
         return;
     }
     if (!net::DefaultGridMap().IsWalkable(col, row)) {
+        return;
+    }
+
+    if (const std::optional<int> enemyId = FindEnemyAtCell(col, row)) {
+        gClient.SendAttackRequest(*enemyId);
         return;
     }
 

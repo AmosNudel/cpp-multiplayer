@@ -36,6 +36,9 @@ std::optional<GridPoint> FindBestAdjacentApproachTile(const GridMap& map, int st
 
     std::optional<GridPoint> best;
     int bestPathLength = std::numeric_limits<int>::max();
+    int bestSideAlignment = std::numeric_limits<int>::min();
+    const int towardStartCol = startCol - targetCol;
+    const int towardStartRow = startRow - targetRow;
 
     for (const auto& direction : kDirections) {
         const int neighborCol = targetCol + direction[0];
@@ -52,8 +55,12 @@ std::optional<GridPoint> FindBestAdjacentApproachTile(const GridMap& map, int st
         }
 
         const int pathLength = static_cast<int>(path.size());
-        if (pathLength < bestPathLength) {
+        const int sideAlignment =
+            direction[0] * towardStartCol + direction[1] * towardStartRow;
+        if (pathLength < bestPathLength ||
+            (pathLength == bestPathLength && sideAlignment > bestSideAlignment)) {
             bestPathLength = pathLength;
+            bestSideAlignment = sideAlignment;
             best = GridPoint{neighborCol, neighborRow};
         }
     }

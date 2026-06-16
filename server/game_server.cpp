@@ -566,6 +566,10 @@ void TryApplyComboSwingDamage(PlayerState& player, ConnectedClient& client, Enem
 
 void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
                        std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
+    if (client.hasMoveTarget) {
+        return;
+    }
+
     ClearPlayerMove(client, player);
 
     EnemyState* enemy = FindEnemy(enemies, player.targetId);
@@ -1165,7 +1169,7 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             }
 
             PlayerState* player = FindPlayer(players_, incoming.clientId);
-            if (player == nullptr || !CanAcceptMoveIntent(player->state)) {
+            if (player == nullptr || player->state == EntityState::Dead) {
                 return;
             }
 
