@@ -134,8 +134,82 @@ static std::string gStatusText = "Press ENTER to connect";
 static std::string gPlayerName = "Player";
 static std::string gChatInput;
 static bool gEditingName = true;
-static bool gChatOpen = false;
+static bool gChatExpanded = false;
+#if !defined(PLATFORM_WEB)
+static bool gOptionsOpen = false;
+#endif
 static Color gLocalColor = RAYWHITE;
+
+static constexpr int kChatPanelX = 20;
+static constexpr int kChatPanelW = 420;
+static constexpr int kChatCollapsedH = 46;
+static constexpr int kChatExpandedH = 170;
+
+static Vector2 GetVirtualMousePosition() {
+    return gViewport.ScreenToVirtual(GetMousePosition());
+}
+
+static Rectangle ChatPanelRect() {
+    const float panelY = gChatExpanded
+                             ? static_cast<float>(GameViewport::kVirtualHeight - kChatExpandedH)
+                             : static_cast<float>(GameViewport::kVirtualHeight - kChatCollapsedH);
+    const float panelH = gChatExpanded ? static_cast<float>(kChatExpandedH)
+                                       : static_cast<float>(kChatCollapsedH);
+    return {
+        static_cast<float>(kChatPanelX),
+        panelY,
+        static_cast<float>(kChatPanelW),
+        panelH,
+    };
+}
+
+static Rectangle ChatToggleButtonRect() {
+    const Rectangle panel = ChatPanelRect();
+    return {
+        panel.x + panel.width - 34.0f,
+        panel.y + 8.0f,
+        24.0f,
+        24.0f,
+    };
+}
+
+static bool IsMouseOverChatPanel(Vector2 virtualPos) {
+    if (gEditingName) {
+        return false;
+    }
+    return CheckCollisionPointRec(virtualPos, ChatPanelRect());
+}
+
+static void DrawUiButton(const char* label, Rectangle bounds) {
+    const Vector2 mouse = GetVirtualMousePosition();
+    const bool hover = CheckCollisionPointRec(mouse, bounds);
+    DrawRectangleRec(bounds, hover ? Color{54, 58, 70, 255} : Color{38, 42, 52, 255});
+    DrawRectangleLinesEx(bounds, 1.0f, Color{82, 88, 104, 255});
+    const int fontSize = 16;
+    const int textW = MeasureText(label, fontSize);
+    DrawText(label,
+             static_cast<int>(bounds.x + (bounds.width - textW) * 0.5f),
+             static_cast<int>(bounds.y + (bounds.height - fontSize) * 0.5f),
+             fontSize, RAYWHITE);
+}
+
+static bool WasUiButtonPressed(Rectangle bounds) {
+    return CheckCollisionPointRec(GetVirtualMousePosition(), bounds) &&
+           IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+}
+
+static std::string TruncateToWidth(const std::string& text, int maxWidth, int fontSize) {
+    if (MeasureText(text.c_str(), fontSize) <= maxWidth) {
+        return text;
+    }
+
+    std::string truncated = text;
+    while (!truncated.empty() &&
+           MeasureText((truncated + "...").c_str(), fontSize) > maxWidth) {
+        truncated.pop_back();
+    }
+    return truncated + "...";
+}
 
 static Color ColorForPlayer(int playerId) {
     static const Color palette[] = {
@@ -156,24 +230,33 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
         case net::ClientConnectionState::Disconnected:
             gStatusText = detail.empty() ? "Disconnected" : detail;
             gEditingName = true;
-            gChatOpen = false;
+            gChatExpanded = false;
             gChatInput.clear();
+#if !defined(PLATFORM_WEB)
+            gOptionsOpen = false;
+#endif
             break;
         case net::ClientConnectionState::Connecting:
             gStatusText = detail;
             break;
         case net::ClientConnectionState::Joined:
-            gStatusText = "Connected - click map to move, T to chat";
+            gStatusText = "Connected - click map to move";
             gEditingName = false;
-            gChatOpen = false;
+            gChatExpanded = false;
             gChatInput.clear();
+#if !defined(PLATFORM_WEB)
+            gOptionsOpen = false;
+#endif
             gLocalColor = ColorForPlayer(gClient.GetLocalPlayerId());
             break;
         case net::ClientConnectionState::Rejected:
             gStatusText = "Rejected: " + detail;
             gEditingName = true;
-            gChatOpen = false;
+            gChatExpanded = false;
             gChatInput.clear();
+#if !defined(PLATFORM_WEB)
+            gOptionsOpen = false;
+#endif
             break;
     }
 }
@@ -211,27 +294,18 @@ static bool TryGetWorldCellFromVirtual(Vector2 virtualPos, int& col, int& row) {
     return net::IsValidCell(col, row);
 }
 
-static bool IsMouseOverChatPanel(Vector2 virtualPos) {
-    if (gEditingName) {
-        return false;
-    }
-
-    const Rectangle panel = {
-        20.0f,
-        static_cast<float>(GameViewport::kVirtualHeight - 190),
-        420.0f,
-        170.0f,
-    };
-    return CheckCollisionPointRec(virtualPos, panel);
-}
-
 static void HandleMapClick() {
     const Vector2 screenPos = GetMousePosition();
     if (!gViewport.ContainsScreenPoint(screenPos)) {
         return;
     }
 
-    const Vector2 virtualPos = gViewport.ScreenToVirtual(screenPos);
+    const Vector2 virtualPos = GetVirtualMousePosition();
+#if !defined(PLATFORM_WEB)
+    if (gOptionsOpen) {
+        return;
+    }
+#endif
     if (IsMouseOverChatPanel(virtualPos)) {
         return;
     }
@@ -244,6 +318,61 @@ static void HandleMapClick() {
 
     gClient.SendMoveRequest(col, row);
 }
+
+static void HandleUiClicks() {
+    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        return;
+    }
+
+    const Vector2 screenPos = GetMousePosition();
+    if (!gViewport.ContainsScreenPoint(screenPos)) {
+        return;
+    }
+
+#if !defined(PLATFORM_WEB)
+    if (gOptionsOpen) {
+        return;
+    }
+#endif
+
+    if (WasUiButtonPressed(ChatToggleButtonRect())) {
+        if (gChatExpanded) {
+            gChatExpanded = false;
+            gChatInput.clear();
+        } else {
+            gChatExpanded = true;
+        }
+        return;
+    }
+}
+
+#if !defined(PLATFORM_WEB)
+static void HandleOptionsInput() {
+    if (!gOptionsOpen) {
+        return;
+    }
+
+    const int panelW = 260;
+    const int panelH = 180;
+    const int panelX = (GameViewport::kVirtualWidth - panelW) / 2;
+    const int panelY = (GameViewport::kVirtualHeight - panelH) / 2;
+    const Rectangle resumeBtn = {static_cast<float>(panelX + 30), static_cast<float>(panelY + 52),
+                                 200.0f, 32.0f};
+    const Rectangle exitBtn = {static_cast<float>(panelX + 30), static_cast<float>(panelY + 102),
+                               200.0f, 32.0f};
+
+    if (WasUiButtonPressed(resumeBtn)) {
+        gOptionsOpen = false;
+    }
+
+    if (WasUiButtonPressed(exitBtn)) {
+        if (gClient.GetState() == net::ClientConnectionState::Joined) {
+            gClient.Disconnect();
+        }
+        CloseWindow();
+    }
+}
+#endif
 
 static void DrawGrid() {
     const int originX = static_cast<int>(kWorldScreenOriginX);
@@ -264,16 +393,21 @@ static void DrawGrid() {
 }
 
 static void DrawGridHighlights() {
-    if (gEditingName || gChatOpen) {
+    if (gEditingName || gChatExpanded) {
         return;
     }
+#if !defined(PLATFORM_WEB)
+    if (gOptionsOpen) {
+        return;
+    }
+#endif
 
     const Vector2 screenPos = GetMousePosition();
     if (!gViewport.ContainsScreenPoint(screenPos)) {
         return;
     }
 
-    const Vector2 virtualPos = gViewport.ScreenToVirtual(screenPos);
+    const Vector2 virtualPos = GetVirtualMousePosition();
     int hoverCol = 0;
     int hoverRow = 0;
     if (!IsMouseOverChatPanel(virtualPos) &&
@@ -310,12 +444,6 @@ static void HandleChatInput() {
     if (IsKeyPressed(KEY_ENTER) && !gChatInput.empty()) {
         gClient.SendChat(gChatInput);
         gChatInput.clear();
-        gChatOpen = false;
-    }
-
-    if (IsKeyPressed(KEY_ESCAPE)) {
-        gChatInput.clear();
-        gChatOpen = false;
     }
 }
 
@@ -326,6 +454,17 @@ static void UpdateGame() {
     if (IsKeyPressed(KEY_F11)) {
         ToggleFullscreen();
     }
+
+#if !defined(PLATFORM_WEB)
+    if (IsKeyPressed(KEY_ESCAPE)) {
+        gOptionsOpen = !gOptionsOpen;
+    }
+#else
+    if (IsKeyPressed(KEY_ESCAPE) && gChatExpanded) {
+        gChatExpanded = false;
+        gChatInput.clear();
+    }
+#endif
 
     if (gEditingName) {
         int key = GetCharPressed();
@@ -343,56 +482,110 @@ static void UpdateGame() {
         if (IsKeyPressed(KEY_ENTER) && !gPlayerName.empty()) {
             ConnectToServer();
         }
+#if !defined(PLATFORM_WEB)
+        HandleOptionsInput();
+        if (gOptionsOpen) {
+            return;
+        }
+#endif
         return;
     }
 
-    if (IsKeyPressed(KEY_T) && !gChatOpen) {
-        gChatOpen = true;
-        return;
-    }
-
-    if (gChatOpen) {
+    if (gChatExpanded) {
         HandleChatInput();
-        return;
     }
 
-    if (IsKeyPressed(KEY_ESCAPE)) {
-        gClient.Disconnect();
+#if !defined(PLATFORM_WEB)
+    HandleOptionsInput();
+    if (gOptionsOpen) {
         return;
     }
+#endif
 
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        HandleMapClick();
-    }
+    HandleUiClicks();
+    HandleMapClick();
 }
 
 static void DrawChatPanel() {
-    const int panelX = 20;
-    const int panelY = GameViewport::kVirtualHeight - 190;
-    const int panelW = 420;
-    const int panelH = 170;
+    const Rectangle panel = ChatPanelRect();
+    const int panelX = static_cast<int>(panel.x);
+    const int panelY = static_cast<int>(panel.y);
+    const int panelW = static_cast<int>(panel.width);
+    const int panelH = static_cast<int>(panel.height);
 
     DrawRectangle(panelX, panelY, panelW, panelH, Color{18, 20, 26, 220});
     DrawRectangleLines(panelX, panelY, panelW, panelH, Color{70, 76, 92, 255});
-    DrawText("Chat", panelX + 10, panelY + 8, 18, RAYWHITE);
 
-    int lineY = panelY + 34;
-    for (const net::ChatMessage& line : gClient.GetChatLog()) {
-        const std::string formatted = line.name + ": " + line.text;
-        DrawText(formatted.c_str(), panelX + 10, lineY, 16, LIGHTGRAY);
-        lineY += 18;
-    }
+    const Rectangle toggleButton = ChatToggleButtonRect();
+    if (gChatExpanded) {
+        DrawText("Chat", panelX + 10, panelY + 8, 18, RAYWHITE);
+        DrawUiButton("-", toggleButton);
 
-    if (gChatOpen) {
+        int lineY = panelY + 34;
+        for (const net::ChatMessage& line : gClient.GetChatLog()) {
+            const std::string formatted = line.name + ": " + line.text;
+            DrawText(formatted.c_str(), panelX + 10, lineY, 16, LIGHTGRAY);
+            lineY += 18;
+        }
+
         const int inputY = panelY + panelH - 34;
         DrawRectangle(panelX + 8, inputY, panelW - 16, 26, Color{30, 34, 42, 255});
         DrawText("> ", panelX + 14, inputY + 5, 16, YELLOW);
         DrawText(gChatInput.c_str(), panelX + 34, inputY + 5, 16, YELLOW);
         DrawText("_", panelX + 34 + MeasureText(gChatInput.c_str(), 16), inputY + 5, 16, YELLOW);
-        DrawText("ENTER = send   ESC = close chat", panelX + 10, panelY + panelH - 56, 14, GRAY);
+        DrawText("ENTER = send", panelX + 10, panelY + panelH - 56, 14, GRAY);
     } else {
-        DrawText("T = open chat", panelX + 10, panelY + panelH - 28, 14, GRAY);
+        const net::ChatMessage* latest = nullptr;
+        if (!gClient.GetChatLog().empty()) {
+            latest = &gClient.GetChatLog().back();
+        }
+
+        std::string preview = "No messages yet";
+        if (latest != nullptr) {
+            preview = latest->name + ": " + latest->text;
+        }
+        preview = TruncateToWidth(preview, panelW - 56, 16);
+        DrawText(preview.c_str(), panelX + 10, panelY + 14, 16, LIGHTGRAY);
+        DrawUiButton("+", toggleButton);
     }
+}
+
+#if !defined(PLATFORM_WEB)
+static void DrawOptionsPanel() {
+    if (!gOptionsOpen) {
+        return;
+    }
+
+    DrawRectangle(0, 0, GameViewport::kVirtualWidth, GameViewport::kVirtualHeight,
+                  Color{0, 0, 0, 120});
+
+    const int panelW = 260;
+    const int panelH = 180;
+    const int panelX = (GameViewport::kVirtualWidth - panelW) / 2;
+    const int panelY = (GameViewport::kVirtualHeight - panelH) / 2;
+
+    DrawRectangle(panelX, panelY, panelW, panelH, Color{28, 30, 38, 255});
+    DrawRectangleLines(panelX, panelY, panelW, panelH, Color{82, 88, 104, 255});
+    DrawText("Options", panelX + 16, panelY + 12, 22, RAYWHITE);
+
+    DrawUiButton("Resume", {static_cast<float>(panelX + 30), static_cast<float>(panelY + 52),
+                            200.0f, 32.0f});
+    DrawUiButton("Exit Game", {static_cast<float>(panelX + 30), static_cast<float>(panelY + 102),
+                               200.0f, 32.0f});
+}
+#endif
+
+static void DrawPlayer(const net::PlayerState& player, Color color, float nameOffsetY) {
+    const Vector2 center = {
+        kWorldScreenOriginX + player.x,
+        kWorldScreenOriginY + player.y,
+    };
+
+    gPlayerSprites.Draw(player, gClient.GetServerTick(), center, color);
+    DrawText(player.name.c_str(),
+             static_cast<int>(center.x - 24.0f),
+             static_cast<int>(center.y - nameOffsetY),
+             16, RAYWHITE);
 }
 
 static void DrawGame() {
@@ -412,20 +605,20 @@ static void DrawGame() {
     const float nameOffsetY = gPlayerSprites.AnyLoaded()
                                   ? kPlayerSpriteHeight * 0.5f + 8.0f
                                   : net::kPlayerRadius + 22.0f;
+    const int localPlayerId = gClient.GetLocalPlayerId();
 
     for (const net::PlayerState& player : gClient.GetPlayers()) {
-        const bool isLocal = player.id == gClient.GetLocalPlayerId();
-        const Color color = isLocal ? gLocalColor : ColorForPlayer(player.id);
-        const Vector2 center = {
-            kWorldScreenOriginX + player.x,
-            kWorldScreenOriginY + player.y,
-        };
+        if (player.id == localPlayerId) {
+            continue;
+        }
+        DrawPlayer(player, ColorForPlayer(player.id), nameOffsetY);
+    }
 
-        gPlayerSprites.Draw(player, gClient.GetServerTick(), center, color);
-        DrawText(player.name.c_str(),
-                 static_cast<int>(center.x - 24.0f),
-                 static_cast<int>(center.y - nameOffsetY),
-                 16, RAYWHITE);
+    for (const net::PlayerState& player : gClient.GetPlayers()) {
+        if (player.id != localPlayerId) {
+            continue;
+        }
+        DrawPlayer(player, gLocalColor, nameOffsetY);
     }
 
     DrawText("Multiplayer Template", 20, 20, 24, RAYWHITE);
@@ -435,13 +628,24 @@ static void DrawGame() {
         DrawText("Name:", 20, 100, 20, RAYWHITE);
         DrawText(gPlayerName.c_str(), 90, 100, 20, YELLOW);
         DrawText("_", 90 + MeasureText(gPlayerName.c_str(), 20), 100, 20, YELLOW);
-        DrawText("ENTER = connect   ESC = quit", 20, 130, 16, GRAY);
+        DrawText("ENTER = connect", 20, 130, 16, GRAY);
+#if !defined(PLATFORM_WEB)
+        DrawText("ESC = options", 20, 152, 16, GRAY);
+#endif
     } else {
         DrawText(TextFormat("Tick: %u", gClient.GetServerTick()), 20, 100, 18, GRAY);
         DrawText(TextFormat("Ping: %d ms", gClient.GetPingMs()), 20, 124, 18, GRAY);
-        DrawText("F11 = fullscreen   ESC = disconnect", 20, 148, 16, GRAY);
+#if !defined(PLATFORM_WEB)
+        DrawText("F11 = fullscreen   ESC = options", 20, 148, 16, GRAY);
+#else
+        DrawText("F11 = fullscreen", 20, 148, 16, GRAY);
+#endif
         DrawChatPanel();
     }
+
+#if !defined(PLATFORM_WEB)
+    DrawOptionsPanel();
+#endif
 
     gViewport.EndFrame();
 }

@@ -9,6 +9,7 @@ void InitGameWindow(const char* title) {
     SetWindowState(FLAG_WINDOW_RESIZABLE);
 #endif
     SetTargetFPS(60);
+    SetExitKey(KEY_NULL);
 }
 
 void GameViewport::Init() {
