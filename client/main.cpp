@@ -16,7 +16,7 @@ static const int screenHeight = 640;
 
 static const char* kIdleSpritePath =
     "assets/player_sprites/Sprites/with_outline/IDLE.png";
-static const float kPlayerSpriteHeight = 64.0f;
+static const float kPlayerSpriteHeight = 96.0f;
 
 struct PlayerIdleSprite {
     Texture2D texture{};
@@ -42,12 +42,9 @@ struct PlayerIdleSprite {
         }
     }
 
-    void Draw(Vector2 center, Color tint, bool highlight, int frame) const {
+    void Draw(Vector2 center, Color tint, int frame, bool facingRight) const {
         if (!loaded) {
             DrawCircleV(center, net::kPlayerRadius, tint);
-            if (highlight) {
-                DrawCircleLinesV(center, net::kPlayerRadius + 3.0f, RAYWHITE);
-            }
             return;
         }
 
@@ -59,18 +56,21 @@ struct PlayerIdleSprite {
         const float scale = kPlayerSpriteHeight / static_cast<float>(frameHeight);
         const float drawWidth = static_cast<float>(frameWidth) * scale;
         const float drawHeight = static_cast<float>(frameHeight) * scale;
-        const Rectangle dest = {
-            center.x - drawWidth * 0.5f,
-            center.y - drawHeight * 0.5f,
-            drawWidth,
-            drawHeight,
-        };
+        const Rectangle dest = facingRight
+                                   ? Rectangle{
+                                         center.x - drawWidth * 0.5f,
+                                         center.y - drawHeight * 0.5f,
+                                         drawWidth,
+                                         drawHeight,
+                                     }
+                                   : Rectangle{
+                                         center.x + drawWidth * 0.5f,
+                                         center.y - drawHeight * 0.5f,
+                                         -drawWidth,
+                                         drawHeight,
+                                     };
 
         DrawTexturePro(texture, source, dest, Vector2{0.0f, 0.0f}, 0.0f, tint);
-
-        if (highlight) {
-            DrawRectangleLinesEx(dest, 2.0f, RAYWHITE);
-        }
     }
 };
 
@@ -269,7 +269,7 @@ static void DrawGame() {
 
         const int frame = net::AnimFrameIndex(player.anim, gClient.GetServerTick(),
                                               player.animStartTick);
-        gPlayerIdleSprite.Draw(center, color, isLocal, frame);
+        gPlayerIdleSprite.Draw(center, color, frame, player.facingRight);
         DrawText(player.name.c_str(),
                  static_cast<int>(center.x - 24.0f),
                  static_cast<int>(center.y - nameOffsetY),

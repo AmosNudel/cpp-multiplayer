@@ -244,6 +244,12 @@ void GameServer::SimulateTick() {
         if (input.left) dx -= 1.0f;
         if (input.right) dx += 1.0f;
 
+        if (input.right) {
+            player.facingRight = true;
+        } else if (input.left) {
+            player.facingRight = false;
+        }
+
         const float length = std::sqrt(dx * dx + dy * dy);
         if (length > 0.0f) {
             dx /= length;

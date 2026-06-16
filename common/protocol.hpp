@@ -38,6 +38,7 @@ struct PlayerState {
     float y = 0.0f;
     PlayerAnim anim = PlayerAnim::Idle;
     uint32_t animStartTick = 0;
+    bool facingRight = true;
 };
 
 struct JoinRequest {
