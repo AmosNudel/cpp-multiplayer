@@ -18,6 +18,11 @@ inline constexpr float kGoblinSpriteHeight = 128.0f;
 inline constexpr int kDefaultGoblinCol = 7;
 inline constexpr int kDefaultGoblinRow = 7;
 inline constexpr int kDefaultGoblinId = 1;
+inline constexpr int kGoblinPatrolMinCol = 5;
+inline constexpr int kGoblinPatrolMaxCol = 9;
+inline constexpr int kGoblinPatrolMinRow = 5;
+inline constexpr int kGoblinPatrolMaxRow = 9;
+inline constexpr int kGoblinAggroCellDistance = 1;
 
 struct EnemyState {
     int id = 0;

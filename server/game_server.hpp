@@ -28,6 +28,15 @@ enum class PlayerComboPhase : uint8_t {
     Attack3,
 };
 
+struct EnemyMovementState {
+    bool hasMoveTarget = false;
+    std::vector<std::pair<int, int>> movePath;
+    size_t pathIndex = 0;
+    size_t patrolWaypointIndex = 0;
+    bool chasingPlayer = false;
+    int chaseTargetId = -1;
+};
+
 struct ConnectedClient {
     int id = 0;
     TransportKind transport = TransportKind::Tcp;
@@ -86,6 +95,7 @@ private:
     std::unordered_map<int, TransportKind> transportByClientId_;
     std::vector<PlayerState> players_;
     std::vector<EnemyState> enemies_;
+    std::unordered_map<int, EnemyMovementState> enemyMovement_;
     std::vector<ChatMessage> chatHistory_;
     uint32_t tick_ = 0;
     bool running_ = false;
