@@ -10,6 +10,7 @@
 #include "common/config.hpp"
 #include "common/enemies.hpp"
 #include "common/entity_state.hpp"
+#include "common/session.hpp"
 
 namespace net {
 
@@ -22,6 +23,7 @@ enum class MessageType {
     CancelCombatRequest,
     DisengageRequest,
     RespawnEnemyRequest,
+    SetReadyRequest,
     WorldState,
     PlayerLeft,
     Ping,
@@ -47,6 +49,17 @@ struct RespawnEnemyRequest {
     int enemyId = kDefaultGoblinId;
 };
 
+struct SetReadyRequest {
+    bool ready = true;
+};
+
+struct SessionSnapshot {
+    SessionPhase phase = SessionPhase::HubIdle;
+    uint32_t phaseEndsAtTick = 0;
+    std::vector<int> readyPlayerIds;
+    int hubPlayerCount = 0;
+};
+
 struct PlayerState {
     int id = 0;
     std::string name;
@@ -62,6 +75,8 @@ struct PlayerState {
     int targetId = -1;
     int moveTargetCol = -1;
     int moveTargetRow = -1;
+    SceneId sceneId = SceneId::Hub;
+    bool isReady = false;
 };
 
 struct JoinRequest {
@@ -72,6 +87,7 @@ struct JoinAccepted {
     int playerId = 0;
     std::vector<PlayerState> players;
     std::vector<EnemyState> enemies;
+    SessionSnapshot session;
 };
 
 struct JoinRejected {
@@ -86,6 +102,7 @@ struct WorldState {
     uint32_t tick = 0;
     std::vector<PlayerState> players;
     std::vector<EnemyState> enemies;
+    SessionSnapshot session;
 };
 
 struct PingMessage {
@@ -117,6 +134,7 @@ struct Message {
     CancelCombatRequest cancelCombatRequest;
     DisengageRequest disengageRequest;
     RespawnEnemyRequest respawnEnemyRequest;
+    SetReadyRequest setReadyRequest;
     WorldState worldState;
     PlayerLeft playerLeft;
     PingMessage ping;
@@ -130,15 +148,18 @@ MessageType ParseMessageType(const std::string& value);
 
 Message MakeJoinRequest(const std::string& name);
 Message MakeJoinAccepted(int playerId, const std::vector<PlayerState>& players,
-                         const std::vector<EnemyState>& enemies);
+                         const std::vector<EnemyState>& enemies,
+                         const SessionSnapshot& session);
 Message MakeJoinRejected(const std::string& reason);
 Message MakeMoveRequest(int col, int row);
 Message MakeAttackRequest(int enemyId);
 Message MakeCancelCombatRequest();
 Message MakeDisengageRequest();
 Message MakeRespawnEnemyRequest(int enemyId = kDefaultGoblinId);
+Message MakeSetReadyRequest(bool ready);
 Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players,
-                       const std::vector<EnemyState>& enemies);
+                       const std::vector<EnemyState>& enemies,
+                       const SessionSnapshot& session);
 Message MakePlayerLeft(int playerId);
 Message MakePing(uint32_t clientTimeMs);
 Message MakePong(uint32_t clientTimeMs, uint32_t serverTimeMs);

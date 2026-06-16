@@ -199,6 +199,45 @@ std::vector<std::pair<int, int>> BuildGoblinPatrolWaypoints(const GridMap& map, 
     return waypoints;
 }
 
+std::vector<std::pair<int, int>> AllocateSpawnCells(const GridMap& map, int count) {
+    const auto [centerCol, centerRow] = ResolvePlayerSpawnCell(map);
+    std::vector<std::pair<int, int>> result;
+    if (count <= 0) {
+        return result;
+    }
+
+    std::vector<std::pair<int, int>> queue = {{centerCol, centerRow}};
+    std::vector<std::vector<bool>> visited(static_cast<size_t>(kGridRows),
+                                           std::vector<bool>(static_cast<size_t>(kGridCols), false));
+    visited[static_cast<size_t>(centerRow)][static_cast<size_t>(centerCol)] = true;
+
+    size_t queueIndex = 0;
+    while (queueIndex < queue.size() && static_cast<int>(result.size()) < count) {
+        const auto [col, row] = queue[queueIndex++];
+        if (map.IsWalkable(col, row)) {
+            result.emplace_back(col, row);
+        }
+
+        constexpr int kDirections[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (const auto& direction : kDirections) {
+            const int nextCol = col + direction[0];
+            const int nextRow = row + direction[1];
+            if (!IsValidCell(nextCol, nextRow) ||
+                visited[static_cast<size_t>(nextRow)][static_cast<size_t>(nextCol)]) {
+                continue;
+            }
+            visited[static_cast<size_t>(nextRow)][static_cast<size_t>(nextCol)] = true;
+            queue.emplace_back(nextCol, nextRow);
+        }
+    }
+
+    while (static_cast<int>(result.size()) < count) {
+        result.emplace_back(centerCol, centerRow);
+    }
+
+    return result;
+}
+
 EnemyState CreateGoblinAt(int id, int col, int row) {
     EnemyState goblin;
     goblin.id = id;
@@ -213,7 +252,7 @@ EnemyState CreateGoblinAt(int id, int col, int row) {
 }
 
 std::vector<EnemyState> CreateDefaultEnemies() {
-    const GridMap& map = DefaultGridMap();
+    const GridMap& map = ArenaGridMap();
     const auto [playerCol, playerRow] = ResolvePlayerSpawnCell(map);
     std::vector<std::pair<int, int>> spawnPoints =
         CollectGoblinSpawnPoints(map, playerCol, playerRow);

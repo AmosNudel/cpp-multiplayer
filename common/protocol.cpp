@@ -6,9 +6,36 @@
 
 #include "common/entity_defs.hpp"
 #include "common/entity_registry.hpp"
+#include "common/session.hpp"
 
 namespace net {
 namespace {
+
+nlohmann::json SessionSnapshotToJson(const SessionSnapshot& session) {
+    nlohmann::json json = {
+        {"phase", SessionPhaseName(session.phase)},
+        {"phase_ends_at_tick", session.phaseEndsAtTick},
+        {"hub_player_count", session.hubPlayerCount},
+        {"ready_player_ids", nlohmann::json::array()},
+    };
+    for (int playerId : session.readyPlayerIds) {
+        json["ready_player_ids"].push_back(playerId);
+    }
+    return json;
+}
+
+SessionSnapshot SessionSnapshotFromJson(const nlohmann::json& json) {
+    SessionSnapshot session;
+    session.phase = ParseSessionPhase(json.value("phase", "hub_idle"));
+    session.phaseEndsAtTick = json.value("phase_ends_at_tick", 0u);
+    session.hubPlayerCount = json.value("hub_player_count", 0);
+    if (json.contains("ready_player_ids")) {
+        for (const auto& playerIdJson : json.at("ready_player_ids")) {
+            session.readyPlayerIds.push_back(playerIdJson.get<int>());
+        }
+    }
+    return session;
+}
 
 nlohmann::json PlayerStateToJson(const PlayerState& player) {
     nlohmann::json json = {
@@ -23,6 +50,8 @@ nlohmann::json PlayerStateToJson(const PlayerState& player) {
         {"facing_right", player.facingRight},
         {"hp", player.hp},
         {"shield", player.shield},
+        {"scene_id", SceneIdName(player.sceneId)},
+        {"is_ready", player.isReady},
     };
     if (player.targetId >= 0) {
         json["target_id"] = player.targetId;
@@ -50,6 +79,8 @@ PlayerState PlayerStateFromJson(const nlohmann::json& json) {
     player.targetId = json.value("target_id", -1);
     player.moveTargetCol = json.value("move_target_col", -1);
     player.moveTargetRow = json.value("move_target_row", -1);
+    player.sceneId = ParseSceneId(json.value("scene_id", "hub"));
+    player.isReady = json.value("is_ready", false);
     return player;
 }
 
@@ -120,6 +151,7 @@ const char* MessageTypeName(MessageType type) {
         case MessageType::CancelCombatRequest: return "cancel_combat_request";
         case MessageType::DisengageRequest: return "disengage_request";
         case MessageType::RespawnEnemyRequest: return "respawn_enemy_request";
+        case MessageType::SetReadyRequest: return "set_ready_request";
         case MessageType::WorldState: return "world_state";
         case MessageType::PlayerLeft: return "player_left";
         case MessageType::Ping: return "ping";
@@ -139,6 +171,7 @@ MessageType ParseMessageType(const std::string& value) {
     if (value == "cancel_combat_request") return MessageType::CancelCombatRequest;
     if (value == "disengage_request") return MessageType::DisengageRequest;
     if (value == "respawn_enemy_request") return MessageType::RespawnEnemyRequest;
+    if (value == "set_ready_request") return MessageType::SetReadyRequest;
     if (value == "world_state") return MessageType::WorldState;
     if (value == "player_left") return MessageType::PlayerLeft;
     if (value == "ping") return MessageType::Ping;
@@ -156,12 +189,14 @@ Message MakeJoinRequest(const std::string& name) {
 }
 
 Message MakeJoinAccepted(int playerId, const std::vector<PlayerState>& players,
-                         const std::vector<EnemyState>& enemies) {
+                         const std::vector<EnemyState>& enemies,
+                         const SessionSnapshot& session) {
     Message message;
     message.type = MessageType::JoinAccepted;
     message.joinAccepted.playerId = playerId;
     message.joinAccepted.players = players;
     message.joinAccepted.enemies = enemies;
+    message.joinAccepted.session = session;
     return message;
 }
 
@@ -206,13 +241,22 @@ Message MakeRespawnEnemyRequest(int enemyId) {
     return message;
 }
 
+Message MakeSetReadyRequest(bool ready) {
+    Message message;
+    message.type = MessageType::SetReadyRequest;
+    message.setReadyRequest.ready = ready;
+    return message;
+}
+
 Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players,
-                       const std::vector<EnemyState>& enemies) {
+                       const std::vector<EnemyState>& enemies,
+                       const SessionSnapshot& session) {
     Message message;
     message.type = MessageType::WorldState;
     message.worldState.tick = tick;
     message.worldState.players = players;
     message.worldState.enemies = enemies;
+    message.worldState.session = session;
     return message;
 }
 
@@ -279,6 +323,7 @@ std::string SerializeMessage(const Message& message) {
             for (const EnemyState& enemy : message.joinAccepted.enemies) {
                 json["enemies"].push_back(EnemyStateToJson(enemy));
             }
+            json["session"] = SessionSnapshotToJson(message.joinAccepted.session);
             break;
         case MessageType::JoinRejected:
             json["reason"] = message.joinRejected.reason;
@@ -297,6 +342,9 @@ std::string SerializeMessage(const Message& message) {
         case MessageType::RespawnEnemyRequest:
             json["enemy_id"] = message.respawnEnemyRequest.enemyId;
             break;
+        case MessageType::SetReadyRequest:
+            json["ready"] = message.setReadyRequest.ready;
+            break;
         case MessageType::WorldState:
             json["tick"] = message.worldState.tick;
             json["players"] = nlohmann::json::array();
@@ -307,6 +355,7 @@ std::string SerializeMessage(const Message& message) {
             for (const EnemyState& enemy : message.worldState.enemies) {
                 json["enemies"].push_back(EnemyStateToJson(enemy));
             }
+            json["session"] = SessionSnapshotToJson(message.worldState.session);
             break;
         case MessageType::PlayerLeft:
             json["player_id"] = message.playerLeft.playerId;
@@ -353,6 +402,9 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
                         message.joinAccepted.enemies.push_back(EnemyStateFromJson(enemyJson));
                     }
                 }
+                if (json.contains("session")) {
+                    message.joinAccepted.session = SessionSnapshotFromJson(json.at("session"));
+                }
                 break;
             case MessageType::JoinRejected:
                 message.joinRejected.reason = json.at("reason").get<std::string>();
@@ -372,6 +424,9 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
                 message.respawnEnemyRequest.enemyId =
                     json.value("enemy_id", kDefaultGoblinId);
                 break;
+            case MessageType::SetReadyRequest:
+                message.setReadyRequest.ready = json.value("ready", true);
+                break;
             case MessageType::WorldState:
                 message.worldState.tick = json.at("tick").get<uint32_t>();
                 for (const auto& playerJson : json.at("players")) {
@@ -381,6 +436,9 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
                     for (const auto& enemyJson : json.at("enemies")) {
                         message.worldState.enemies.push_back(EnemyStateFromJson(enemyJson));
                     }
+                }
+                if (json.contains("session")) {
+                    message.worldState.session = SessionSnapshotFromJson(json.at("session"));
                 }
                 break;
             case MessageType::PlayerLeft:

@@ -56,6 +56,7 @@ std::pair<int, int> PickRandomGoblinSpawnCell(const GridMap& map,
 bool EnemiesShareTiles(const std::vector<EnemyState>& enemies);
 std::vector<std::pair<int, int>> BuildGoblinPatrolWaypoints(const GridMap& map, int anchorCol,
                                                              int anchorRow);
+std::vector<std::pair<int, int>> AllocateSpawnCells(const GridMap& map, int count);
 std::vector<EnemyState> CreateDefaultEnemies();
 EnemyState CreateGoblinAt(int id, int col, int row);
 

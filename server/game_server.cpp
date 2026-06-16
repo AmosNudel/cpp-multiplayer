@@ -15,9 +15,14 @@
 #include "common/grid.hpp"
 #include "common/grid_map.hpp"
 #include "common/pathfinding.hpp"
+#include "common/session.hpp"
 
 namespace net {
 namespace {
+
+const GridMap& MapForScene(SceneId scene) {
+    return scene == SceneId::Arena ? ArenaGridMap() : HubGridMap();
+}
 
 TransportKind TransportForClientId(int clientId) {
     return clientId >= 10000 ? TransportKind::WebSocket : TransportKind::Tcp;
@@ -221,6 +226,9 @@ PlayerState* FindGoblinAggroTarget(const EnemyState& enemy, std::vector<PlayerSt
     int bestDistance = kGoblinAggroCellDistance + 1;
 
     for (PlayerState& player : players) {
+        if (player.sceneId != SceneId::Arena) {
+            continue;
+        }
         if (!IsAlive(player.state) || player.state == EntityState::Hit ||
             player.state == EntityState::Dead || IsLeavingCombat(player.state)) {
             continue;
@@ -861,7 +869,7 @@ void RespawnEnemy(int enemyId, std::vector<EnemyState>& enemies,
 
     enemyMovement.erase(enemyId);
 
-    const GridMap& map = DefaultGridMap();
+    const GridMap& map = ArenaGridMap();
     const auto [spawnCol, spawnRow] = PickRandomGoblinSpawnCell(map, enemies, enemyId);
 
     EnemyState* enemy = FindEnemy(enemies, enemyId);
@@ -881,7 +889,8 @@ void RespawnEnemy(int enemyId, std::vector<EnemyState>& enemies,
 }
 
 void TryCompletePendingEngage(ConnectedClient& client, PlayerState& player,
-                              std::vector<EnemyState>& enemies, uint32_t tick) {
+                              std::vector<EnemyState>& enemies, const GridMap& map,
+                              uint32_t tick) {
     if (client.pendingAttackEnemyId < 0) {
         return;
     }
@@ -899,7 +908,7 @@ void TryCompletePendingEngage(ConnectedClient& client, PlayerState& player,
 
     if (!IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
         client.pendingAttackEnemyId = enemyId;
-        if (TryPathToCombatTarget(player, client, *enemy, DefaultGridMap(), tick)) {
+        if (TryPathToCombatTarget(player, client, *enemy, map, tick)) {
             return;
         }
         EndPlayerCombat(player, enemies, tick);
@@ -964,7 +973,7 @@ bool StepPlayerMovement(PlayerState& player, ConnectedClient& client, uint32_t t
 }
 
 void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
-                        std::vector<EnemyState>& enemies, uint32_t tick) {
+                        std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
     if (player.state == EntityState::Dead) {
         ClearPlayerMove(client, player);
         return;
@@ -972,7 +981,7 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
 
     if (player.state == EntityState::Disengaging) {
         ClearPlayerMove(client, player);
-        UpdatePlayerDisengage(player, client, DefaultGridMap(), tick);
+        UpdatePlayerDisengage(player, client, map, tick);
         return;
     }
 
@@ -1021,7 +1030,7 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
                 TransitionEntity(player.state, player.stateStartTick, player.anim,
                                  player.animStartTick, EntityState::Dead, tick);
             } else {
-                RecoverPlayerAfterHit(player, client, enemies, DefaultGridMap(), tick);
+                RecoverPlayerAfterHit(player, client, enemies, map, tick);
             }
         }
         return;
@@ -1030,7 +1039,7 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
     if (player.state == EntityState::Moving || client.hasMoveTarget) {
         StepPlayerMovement(player, client, tick);
         if (!client.hasMoveTarget) {
-            TryCompletePendingEngage(client, player, enemies, tick);
+            TryCompletePendingEngage(client, player, enemies, map, tick);
             if (player.state == EntityState::Moving) {
                 TransitionEntity(player.state, player.stateStartTick, player.anim,
                                  player.animStartTick, EntityState::Idle, tick);
@@ -1039,7 +1048,7 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
     }
 
     if (player.state == EntityState::Combat) {
-        UpdatePlayerCombo(player, client, enemies, DefaultGridMap(), tick);
+        UpdatePlayerCombo(player, client, enemies, map, tick);
     }
 }
 
@@ -1165,7 +1174,7 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
 void HandlePlayerEngageRequest(PlayerState& player, ConnectedClient& client,
                                std::vector<EnemyState>& enemies, int enemyId,
                                const GridMap& map, uint32_t tick) {
-    if (!CanAcceptAttackIntent(player.state)) {
+    if (player.sceneId != SceneId::Arena || !CanAcceptAttackIntent(player.state)) {
         return;
     }
 
@@ -1225,15 +1234,8 @@ bool GameServer::Start(uint16_t tcpPort, uint16_t wsPort) {
 
     running_ = true;
     InitializeEntityRegistry();
-    enemies_ = CreateDefaultEnemies();
-    if (EnemiesShareTiles(enemies_)) {
-        std::cerr << "[game] warning: goblins spawned on shared tiles\n";
-    }
-    for (EnemyState& enemy : enemies_) {
-        enemy.stateStartTick = tick_;
-        enemy.animStartTick = tick_;
-        InitializeGoblinMovement(enemyMovement_[enemy.id], DefaultGridMap(), enemy, tick_);
-    }
+    sessionPhase_ = SessionPhase::HubIdle;
+    sessionPhaseEndsAtTick_ = 0;
     return true;
 }
 
@@ -1330,7 +1332,7 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             clients_[incoming.clientId] = client;
             transportByClientId_[incoming.clientId] = incoming.transport;
 
-            const GridMap& map = DefaultGridMap();
+            const GridMap& map = HubGridMap();
             const auto [spawnCol, spawnRow] = ResolvePlayerSpawnCell(map);
 
             PlayerState player;
@@ -1349,10 +1351,14 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             player.shield = playerStats.maxShield;
             player.moveTargetCol = -1;
             player.moveTargetRow = -1;
+            player.sceneId = SceneId::Hub;
+            player.isReady = false;
             players_.push_back(player);
 
+            const WorldState worldState = BuildWorldStateForClient(incoming.clientId);
             SendToClient(incoming.clientId, incoming.transport,
-                         MakeJoinAccepted(incoming.clientId, BuildPlayerSnapshot(), enemies_));
+                         MakeJoinAccepted(incoming.clientId, worldState.players, worldState.enemies,
+                                          worldState.session));
             if (!chatHistory_.empty()) {
                 SendToClient(incoming.clientId, incoming.transport,
                              MakeChatHistory(chatHistory_));
@@ -1368,13 +1374,14 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             }
 
             PlayerState* player = FindPlayer(players_, incoming.clientId);
-            if (player == nullptr || !CanAcceptMoveIntent(player->state)) {
+            if (player == nullptr || !CanAcceptMoveIntent(player->state) ||
+                player->sceneId == SceneId::Arena && player->state == EntityState::Dead) {
                 return;
             }
 
             const int col = incoming.message.moveRequest.col;
             const int row = incoming.message.moveRequest.row;
-            const GridMap& map = DefaultGridMap();
+            const GridMap& map = MapForScene(player->sceneId);
             if (!IsValidCell(col, row) || !map.IsWalkable(col, row)) {
                 return;
             }
@@ -1413,8 +1420,17 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             }
 
             HandlePlayerEngageRequest(*player, it->second, enemies_,
-                                      incoming.message.attackRequest.enemyId, DefaultGridMap(),
-                                      tick_);
+                                      incoming.message.attackRequest.enemyId,
+                                      ArenaGridMap(), tick_);
+            break;
+        }
+        case MessageType::SetReadyRequest: {
+            auto it = clients_.find(incoming.clientId);
+            if (it == clients_.end() || !it->second.hasJoined) {
+                return;
+            }
+
+            HandleSetReady(incoming.clientId, incoming.message.setReadyRequest.ready);
             break;
         }
         case MessageType::CancelCombatRequest: {
@@ -1442,13 +1458,19 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
                 return;
             }
 
-            DisengagePlayerCombat(*player, it->second, enemies_, players_, DefaultGridMap(),
-                                  tick_);
+            DisengagePlayerCombat(*player, it->second, enemies_, players_,
+                                  MapForScene(player->sceneId), tick_);
             break;
         }
         case MessageType::RespawnEnemyRequest: {
             auto it = clients_.find(incoming.clientId);
             if (it == clients_.end() || !it->second.hasJoined) {
+                return;
+            }
+
+            PlayerState* player = FindPlayer(players_, incoming.clientId);
+            if (player == nullptr || player->sceneId != SceneId::Arena ||
+                sessionPhase_ != SessionPhase::ArenaActive) {
                 return;
             }
 
@@ -1511,13 +1533,16 @@ void GameServer::HandleDisconnect(int clientId, TransportKind transport) {
 }
 
 void GameServer::SimulateTick() {
+    UpdateSession();
+
     for (PlayerState& player : players_) {
         auto clientIt = clients_.find(player.id);
         if (clientIt == clients_.end()) {
             continue;
         }
 
-        UpdatePlayerEntity(player, clientIt->second, enemies_, tick_);
+        const GridMap& map = MapForScene(player.sceneId);
+        UpdatePlayerEntity(player, clientIt->second, enemies_, map, tick_);
 
         if (player.state != EntityState::Dead) {
             const float margin = kPlayerRadius;
@@ -1526,16 +1551,36 @@ void GameServer::SimulateTick() {
         }
     }
 
-    for (EnemyState& enemy : enemies_) {
-        UpdateEnemyEntity(enemy, enemyMovement_[enemy.id], players_, clients_, enemies_,
-                          DefaultGridMap(), tick_);
-    }
+    if (sessionPhase_ == SessionPhase::ArenaActive) {
+        const GridMap& arenaMap = ArenaGridMap();
+        for (EnemyState& enemy : enemies_) {
+            UpdateEnemyEntity(enemy, enemyMovement_[enemy.id], players_, clients_, enemies_,
+                              arenaMap, tick_);
+        }
 
-    RemoveExpiredEnemyCorpses(enemies_, enemyMovement_, tick_);
+        RemoveExpiredEnemyCorpses(enemies_, enemyMovement_, tick_);
+    }
 }
 
 void GameServer::BroadcastWorldState() {
-    BroadcastToAll(MakeWorldState(tick_, players_, enemies_));
+    std::vector<std::pair<int, TransportKind>> recipients;
+    recipients.reserve(transportByClientId_.size());
+    for (const auto& [clientId, transport] : transportByClientId_) {
+        recipients.emplace_back(clientId, transport);
+    }
+
+    for (const auto& [clientId, transport] : recipients) {
+        if (transportByClientId_.find(clientId) == transportByClientId_.end()) {
+            continue;
+        }
+
+        const WorldState worldState = BuildWorldStateForClient(clientId);
+        if (!SendToClient(clientId, transport,
+                          MakeWorldState(worldState.tick, worldState.players, worldState.enemies,
+                                         worldState.session))) {
+            EnqueueDisconnect(clientId, transport);
+        }
+    }
 }
 
 void GameServer::RecordAndBroadcastChat(const ChatMessage& entry) {
@@ -1570,8 +1615,241 @@ bool GameServer::SendToClient(int clientId, TransportKind transport, const Messa
     return wsListener_.SendTo(clientId, message);
 }
 
-std::vector<PlayerState> GameServer::BuildPlayerSnapshot() const {
-    return players_;
+std::vector<PlayerState> GameServer::BuildPlayerSnapshot(SceneId scene) const {
+    std::vector<PlayerState> snapshot;
+    snapshot.reserve(players_.size());
+    for (const PlayerState& player : players_) {
+        if (player.sceneId == scene) {
+            snapshot.push_back(player);
+        }
+    }
+    return snapshot;
+}
+
+SessionSnapshot GameServer::BuildSessionSnapshot() const {
+    SessionSnapshot session;
+    session.phase = sessionPhase_;
+    session.phaseEndsAtTick = sessionPhaseEndsAtTick_;
+    session.hubPlayerCount = CountPlayersInScene(SceneId::Hub);
+    for (const PlayerState& player : players_) {
+        if (player.sceneId == SceneId::Hub && player.isReady) {
+            session.readyPlayerIds.push_back(player.id);
+        }
+    }
+    return session;
+}
+
+WorldState GameServer::BuildWorldStateForClient(int clientId) const {
+    WorldState worldState;
+    worldState.tick = tick_;
+    worldState.session = BuildSessionSnapshot();
+
+    const PlayerState* viewer = nullptr;
+    for (const PlayerState& player : players_) {
+        if (player.id == clientId) {
+            viewer = &player;
+            break;
+        }
+    }
+
+    const SceneId scene = viewer != nullptr ? viewer->sceneId : SceneId::Hub;
+    worldState.players = BuildPlayerSnapshot(scene);
+    if (scene == SceneId::Arena) {
+        worldState.enemies = enemies_;
+    }
+    return worldState;
+}
+
+int GameServer::CountPlayersInScene(SceneId scene) const {
+    int count = 0;
+    for (const PlayerState& player : players_) {
+        if (player.sceneId == scene) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+int GameServer::CountReadyHubPlayers() const {
+    int count = 0;
+    for (const PlayerState& player : players_) {
+        if (player.sceneId == SceneId::Hub && player.isReady) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+void GameServer::ClearAllReady() {
+    for (PlayerState& player : players_) {
+        player.isReady = false;
+    }
+}
+
+void GameServer::ResetPlayerForScene(PlayerState& player, ConnectedClient* client, SceneId scene,
+                                     int spawnCol, int spawnRow) {
+    if (client != nullptr) {
+        CancelPlayerCombat(player, *client, enemies_, tick_);
+        ResetPlayerCombo(*client);
+        ClearPlayerMove(*client, player);
+        ClearPlayerDisengage(*client);
+        ClearPendingMoveAfterDisengage(*client);
+        client->pendingAttackEnemyId = -1;
+    }
+
+    const CombatStats& stats = DefaultEntityRegistry().StatsFor(kPlayerEntityId);
+    player.sceneId = scene;
+    player.isReady = false;
+    player.x = CellCenterX(spawnCol);
+    player.y = CellCenterY(spawnRow);
+    player.hp = stats.maxHp;
+    player.shield = stats.maxShield;
+    player.targetId = -1;
+    player.moveTargetCol = -1;
+    player.moveTargetRow = -1;
+    player.state = EntityState::Idle;
+    player.anim = PlayerAnim::Idle;
+    player.stateStartTick = tick_;
+    player.animStartTick = tick_;
+}
+
+void GameServer::StartArena() {
+    std::vector<int> readyPlayerIds;
+    for (const PlayerState& player : players_) {
+        if (player.sceneId == SceneId::Hub && player.isReady) {
+            readyPlayerIds.push_back(player.id);
+        }
+    }
+    if (readyPlayerIds.empty()) {
+        return;
+    }
+
+    const GridMap& arenaMap = ArenaGridMap();
+    const std::vector<std::pair<int, int>> spawnCells =
+        AllocateSpawnCells(arenaMap, static_cast<int>(readyPlayerIds.size()));
+
+    for (size_t i = 0; i < readyPlayerIds.size(); ++i) {
+        PlayerState* player = FindPlayer(players_, readyPlayerIds[i]);
+        if (player == nullptr) {
+            continue;
+        }
+
+        ConnectedClient* client = FindClient(clients_, player->id);
+        const auto [spawnCol, spawnRow] = spawnCells[i];
+        ResetPlayerForScene(*player, client, SceneId::Arena, spawnCol, spawnRow);
+    }
+
+    enemies_.clear();
+    enemyMovement_.clear();
+    enemies_ = CreateDefaultEnemies();
+    if (EnemiesShareTiles(enemies_)) {
+        std::cerr << "[game] warning: goblins spawned on shared tiles\n";
+    }
+    for (EnemyState& enemy : enemies_) {
+        enemy.stateStartTick = tick_;
+        enemy.animStartTick = tick_;
+        InitializeGoblinMovement(enemyMovement_[enemy.id], arenaMap, enemy, tick_);
+    }
+
+    sessionPhase_ = SessionPhase::ArenaActive;
+    sessionPhaseEndsAtTick_ = tick_ + kArenaDurationTicks;
+    std::cout << "[game] arena started with " << readyPlayerIds.size() << " players\n";
+}
+
+void GameServer::EndArena() {
+    const GridMap& hubMap = HubGridMap();
+    const int returningCount = CountPlayersInScene(SceneId::Arena);
+    const std::vector<std::pair<int, int>> spawnCells =
+        AllocateSpawnCells(hubMap, returningCount);
+    int spawnIndex = 0;
+
+    for (PlayerState& player : players_) {
+        if (player.sceneId != SceneId::Arena) {
+            continue;
+        }
+
+        ConnectedClient* client = FindClient(clients_, player.id);
+        const auto [spawnCol, spawnRow] = spawnCells[static_cast<size_t>(spawnIndex++)];
+        ResetPlayerForScene(player, client, SceneId::Hub, spawnCol, spawnRow);
+    }
+
+    enemies_.clear();
+    enemyMovement_.clear();
+    sessionPhase_ = SessionPhase::HubIdle;
+    sessionPhaseEndsAtTick_ = 0;
+    ClearAllReady();
+    std::cout << "[game] arena ended, players returned to hub\n";
+}
+
+void GameServer::HandleSetReady(int clientId, bool ready) {
+    if (sessionPhase_ == SessionPhase::ArenaActive) {
+        return;
+    }
+
+    PlayerState* player = FindPlayer(players_, clientId);
+    if (player == nullptr || player->sceneId != SceneId::Hub) {
+        return;
+    }
+
+    player->isReady = ready;
+    if (!ready) {
+        return;
+    }
+
+    const int hubCount = CountPlayersInScene(SceneId::Hub);
+    const int readyCount = CountReadyHubPlayers();
+
+    if (hubCount <= 1) {
+        StartArena();
+        return;
+    }
+
+    if (sessionPhase_ == SessionPhase::HubIdle) {
+        sessionPhase_ = SessionPhase::Lobby;
+        sessionPhaseEndsAtTick_ = tick_ + kLobbyDurationTicks;
+    }
+
+    if (readyCount >= hubCount) {
+        StartArena();
+    }
+}
+
+void GameServer::UpdateSession() {
+    if (sessionPhase_ == SessionPhase::Lobby) {
+        const int hubCount = CountPlayersInScene(SceneId::Hub);
+        const int readyCount = CountReadyHubPlayers();
+
+        if (readyCount == 0) {
+            sessionPhase_ = SessionPhase::HubIdle;
+            sessionPhaseEndsAtTick_ = 0;
+            return;
+        }
+
+        if (hubCount <= 1 && readyCount == 1) {
+            StartArena();
+            return;
+        }
+
+        if (hubCount >= 2 && readyCount >= hubCount) {
+            StartArena();
+            return;
+        }
+
+        if (sessionPhaseEndsAtTick_ > 0 && tick_ >= sessionPhaseEndsAtTick_) {
+            if (readyCount > 0) {
+                StartArena();
+            } else {
+                sessionPhase_ = SessionPhase::HubIdle;
+                sessionPhaseEndsAtTick_ = 0;
+            }
+        }
+        return;
+    }
+
+    if (sessionPhase_ == SessionPhase::ArenaActive && sessionPhaseEndsAtTick_ > 0 &&
+        tick_ >= sessionPhaseEndsAtTick_) {
+        EndArena();
+    }
 }
 
 uint32_t GameServer::NowMs() const {

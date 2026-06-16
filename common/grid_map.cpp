@@ -6,7 +6,7 @@ int GridMap::Index(int col, int row) {
     return row * kGridCols + col;
 }
 
-GridMap GridMap::CreateDefault() {
+GridMap GridMap::CreateHub() {
     GridMap map;
 
     for (int col = 0; col < kGridCols; ++col) {
@@ -17,6 +17,12 @@ GridMap GridMap::CreateDefault() {
         map.Set(0, row, TileType::Wall);
         map.Set(kGridCols - 1, row, TileType::Wall);
     }
+
+    return map;
+}
+
+GridMap GridMap::CreateArena() {
+    GridMap map = CreateHub();
 
     map.FillRect(3, 3, 3, 2, TileType::Prop);
     map.FillRect(8, 2, 1, 4, TileType::Prop);
@@ -30,6 +36,10 @@ GridMap GridMap::CreateDefault() {
     map.FillRect(15, 9, 2, 3, TileType::Prop);
 
     return map;
+}
+
+GridMap GridMap::CreateDefault() {
+    return CreateArena();
 }
 
 TileType GridMap::Get(int col, int row) const {
@@ -59,7 +69,17 @@ void GridMap::FillRect(int col, int row, int width, int height, TileType type) {
 }
 
 const GridMap& DefaultGridMap() {
-    static const GridMap map = GridMap::CreateDefault();
+    static const GridMap map = GridMap::CreateArena();
+    return map;
+}
+
+const GridMap& HubGridMap() {
+    static const GridMap map = GridMap::CreateHub();
+    return map;
+}
+
+const GridMap& ArenaGridMap() {
+    static const GridMap map = GridMap::CreateArena();
     return map;
 }
 

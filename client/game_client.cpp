@@ -65,6 +65,7 @@ void GameClient::Disconnect() {
     players_.clear();
     enemies_.clear();
     chatLog_.clear();
+    session_ = {};
     serverTick_ = 0;
     pingMs_ = 0;
     pendingDisconnect_ = false;
@@ -101,6 +102,7 @@ void GameClient::Update() {
         players_.clear();
         enemies_.clear();
         chatLog_.clear();
+        session_ = {};
         serverTick_ = 0;
         pingMs_ = 0;
 
@@ -194,6 +196,19 @@ void GameClient::SendRespawnEnemy(int enemyId) {
     }
 }
 
+void GameClient::SendSetReady(bool ready) {
+    if (state_ != ClientConnectionState::Joined) {
+        return;
+    }
+
+    const Message message = MakeSetReadyRequest(ready);
+    if (useWebSocket_) {
+        wsClient_.Send(message);
+    } else {
+        tcpClient_.Send(message);
+    }
+}
+
 void GameClient::SendChat(const std::string& text) {
     if (state_ != ClientConnectionState::Joined || text.empty()) {
         return;
@@ -213,6 +228,7 @@ void GameClient::HandleMessage(const Message& message) {
             localPlayerId_ = message.joinAccepted.playerId;
             players_ = message.joinAccepted.players;
             enemies_ = message.joinAccepted.enemies;
+            session_ = message.joinAccepted.session;
             chatLog_.clear();
             SetState(ClientConnectionState::Joined, "Joined game");
             break;
@@ -225,6 +241,7 @@ void GameClient::HandleMessage(const Message& message) {
             serverTick_ = message.worldState.tick;
             players_ = message.worldState.players;
             enemies_ = message.worldState.enemies;
+            session_ = message.worldState.session;
             break;
         case MessageType::PlayerLeft:
             players_.erase(

@@ -16,6 +16,7 @@
 #include "common/entity_state.hpp"
 #include "common/grid.hpp"
 #include "common/grid_map.hpp"
+#include "common/session.hpp"
 
 #if defined(PLATFORM_WEB)
 #include <emscripten.h>
@@ -390,7 +391,8 @@ static bool WasUiButtonPressed(Rectangle bounds, bool enabled = true) {
 }
 
 static void DrawRespawnGoblinButton() {
-    if (gEditingName || gClient.GetState() != net::ClientConnectionState::Joined) {
+    if (gEditingName || gClient.GetState() != net::ClientConnectionState::Joined ||
+        GetLocalScene() != net::SceneId::Arena) {
         return;
     }
 
@@ -434,6 +436,68 @@ static Color ColorForPlayer(int playerId) {
     return palette[playerId % 8];
 }
 
+static const net::PlayerState* FindLocalPlayer() {
+    const int localPlayerId = gClient.GetLocalPlayerId();
+    for (const net::PlayerState& player : gClient.GetPlayers()) {
+        if (player.id == localPlayerId) {
+            return &player;
+        }
+    }
+    return nullptr;
+}
+
+static net::SceneId GetLocalScene() {
+    if (const net::PlayerState* player = FindLocalPlayer()) {
+        return player->sceneId;
+    }
+    return net::SceneId::Hub;
+}
+
+static const net::GridMap& GetActiveMap() {
+    return GetLocalScene() == net::SceneId::Arena ? net::ArenaGridMap() : net::HubGridMap();
+}
+
+static void UpdateStatusText() {
+    if (gClient.GetState() != net::ClientConnectionState::Joined) {
+        return;
+    }
+
+    const net::SessionSnapshot& session = gClient.GetSession();
+    if (GetLocalScene() == net::SceneId::Hub &&
+        session.phase == net::SessionPhase::ArenaActive) {
+        gStatusText = "Hub - arena in progress, wait for round to end";
+        return;
+    }
+
+    if (GetLocalScene() == net::SceneId::Arena) {
+        int secondsLeft = 0;
+        if (session.phaseEndsAtTick > gClient.GetServerTick()) {
+            secondsLeft = static_cast<int>((session.phaseEndsAtTick - gClient.GetServerTick()) /
+                                           net::kTickRate);
+        }
+        gStatusText = TextFormat("Arena - %d:%02d remaining", secondsLeft / 60, secondsLeft % 60);
+        return;
+    }
+
+    if (session.phase == net::SessionPhase::Lobby) {
+        int secondsLeft = 0;
+        if (session.phaseEndsAtTick > gClient.GetServerTick()) {
+            secondsLeft = static_cast<int>((session.phaseEndsAtTick - gClient.GetServerTick()) /
+                                           net::kTickRate);
+        }
+        const int readyCount = static_cast<int>(session.readyPlayerIds.size());
+        gStatusText = TextFormat("Hub - %d/%d ready, starting in %ds (click portal)",
+                                 readyCount, session.hubPlayerCount, secondsLeft);
+        return;
+    }
+
+    if (const net::PlayerState* local = FindLocalPlayer(); local != nullptr && local->isReady) {
+        gStatusText = "Hub - ready (click portal to unready)";
+    } else {
+        gStatusText = "Hub - click portal to ready up";
+    }
+}
+
 static void OnConnectionState(net::ClientConnectionState state, const std::string& detail) {
     switch (state) {
         case net::ClientConnectionState::Disconnected:
@@ -449,7 +513,7 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
             gStatusText = detail;
             break;
         case net::ClientConnectionState::Joined:
-            gStatusText = "Connected - click map to move, click enemy to attack";
+            UpdateStatusText();
             gEditingName = false;
             gChatExpanded = false;
             gChatInput.clear();
@@ -525,13 +589,29 @@ static void HandleMapClick() {
     if (!TryGetWorldCellFromVirtual(virtualPos, col, row)) {
         return;
     }
-    if (!net::DefaultGridMap().IsWalkable(col, row)) {
+    if (!net::IsValidCell(col, row)) {
         return;
     }
 
-    if (const std::optional<int> enemyId = FindEnemyAtCell(col, row)) {
-        gClient.SendAttackRequest(*enemyId);
+    if (GetLocalScene() == net::SceneId::Hub && net::IsPortalCell(col, row)) {
+        if (gClient.GetSession().phase == net::SessionPhase::ArenaActive) {
+            return;
+        }
+        const net::PlayerState* local = FindLocalPlayer();
+        const bool newReady = local == nullptr || !local->isReady;
+        gClient.SendSetReady(newReady);
         return;
+    }
+
+    if (!GetActiveMap().IsWalkable(col, row)) {
+        return;
+    }
+
+    if (GetLocalScene() == net::SceneId::Arena) {
+        if (const std::optional<int> enemyId = FindEnemyAtCell(col, row)) {
+            gClient.SendAttackRequest(*enemyId);
+            return;
+        }
     }
 
     gClient.SendMoveRequest(col, row);
@@ -564,6 +644,7 @@ static void HandleUiClicks() {
     }
 
     if (gClient.GetState() == net::ClientConnectionState::Joined &&
+        GetLocalScene() == net::SceneId::Arena &&
         WasUiButtonPressed(RespawnGoblinButtonRect())) {
         gClient.SendRespawnEnemy(net::kDefaultGoblinId);
         return;
@@ -605,14 +686,18 @@ static void HandleOptionsInput() {
 #endif
 
 static void DrawGridTiles() {
-    const net::GridMap& map = net::DefaultGridMap();
+    const net::GridMap& map = GetActiveMap();
     const Color wallColor = Color{90, 94, 104, 255};
     const Color propColor = Color{220, 130, 45, 255};
+    const bool inHub = GetLocalScene() == net::SceneId::Hub;
 
     for (int row = 0; row < net::kGridRows; ++row) {
         for (int col = 0; col < net::kGridCols; ++col) {
             const net::TileType tile = map.Get(col, row);
             if (tile == net::TileType::Empty || tile == net::TileType::Enemy) {
+                if (inHub && net::IsPortalCell(col, row)) {
+                    DrawRectangleRec(CellWorldRect(col, row), Color{70, 120, 255, 220});
+                }
                 continue;
             }
 
@@ -658,10 +743,13 @@ static void DrawGridHighlights() {
     int hoverRow = 0;
     if (!IsMouseOverChatPanel(virtualPos) &&
         TryGetWorldCellFromVirtual(virtualPos, hoverCol, hoverRow)) {
-        const net::GridMap& map = net::DefaultGridMap();
-        const Color hoverColor = map.IsWalkable(hoverCol, hoverRow)
-                                     ? Color{90, 100, 130, 60}
-                                     : Color{180, 80, 80, 50};
+        const net::GridMap& map = GetActiveMap();
+        Color hoverColor = map.IsWalkable(hoverCol, hoverRow)
+                               ? Color{90, 100, 130, 60}
+                               : Color{180, 80, 80, 50};
+        if (GetLocalScene() == net::SceneId::Hub && net::IsPortalCell(hoverCol, hoverRow)) {
+            hoverColor = Color{100, 160, 255, 90};
+        }
         DrawRectangleRec(CellWorldRect(hoverCol, hoverRow), hoverColor);
     }
 
@@ -700,6 +788,7 @@ static void HandleChatInput() {
 static void UpdateGame() {
     gViewport.UpdateLayout();
     gClient.Update();
+    UpdateStatusText();
 
     const Vector2 virtualMouse = GetVirtualMousePosition();
     const bool allowCameraInput = !gEditingName && !gChatExpanded && !IsMouseOverActionsPanel(virtualMouse)
@@ -884,7 +973,11 @@ static void DrawPlayerSprite(const net::PlayerState& player, Color color) {
 
 static void DrawPlayerName(const net::PlayerState& player, float nameOffsetY) {
     const Vector2 virtualCenter = gWorldView.WorldToVirtual({player.x, player.y});
-    DrawText(player.name.c_str(),
+    std::string label = player.name;
+    if (player.sceneId == net::SceneId::Hub && player.isReady) {
+        label += " [ready]";
+    }
+    DrawText(label.c_str(),
              static_cast<int>(virtualCenter.x - 24.0f),
              static_cast<int>(virtualCenter.y - nameOffsetY),
              16, RAYWHITE);
@@ -957,6 +1050,9 @@ static void DrawGame() {
 
     DrawText("Multiplayer Template", 20, 20, 24, RAYWHITE);
     DrawText(gStatusText.c_str(), 20, 52, 18, LIGHTGRAY);
+    if (GetLocalScene() == net::SceneId::Hub) {
+        DrawText("Portal: blue tile near bottom center", 20, 76, 16, GRAY);
+    }
     DrawRespawnGoblinButton();
     DrawActionsPanel();
 

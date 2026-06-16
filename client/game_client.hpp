@@ -33,6 +33,7 @@ public:
     void SendCancelCombat();
     void SendDisengage();
     void SendRespawnEnemy(int enemyId = net::kDefaultGoblinId);
+    void SendSetReady(bool ready);
     void SendChat(const std::string& text);
 
     ClientConnectionState GetState() const { return state_; }
@@ -40,6 +41,7 @@ public:
     const std::vector<PlayerState>& GetPlayers() const { return players_; }
     const std::vector<EnemyState>& GetEnemies() const { return enemies_; }
     const std::vector<ChatMessage>& GetChatLog() const { return chatLog_; }
+    const SessionSnapshot& GetSession() const { return session_; }
     uint32_t GetServerTick() const { return serverTick_; }
     int GetPingMs() const { return pingMs_; }
 
@@ -57,6 +59,7 @@ private:
     std::vector<PlayerState> players_;
     std::vector<EnemyState> enemies_;
     std::vector<ChatMessage> chatLog_;
+    SessionSnapshot session_;
     uint32_t serverTick_ = 0;
     int pingMs_ = 0;
     uint32_t lastPingSentMs_ = 0;

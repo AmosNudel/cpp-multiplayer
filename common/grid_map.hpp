@@ -16,6 +16,8 @@ enum class TileType : std::uint8_t {
 
 class GridMap {
 public:
+    static GridMap CreateHub();
+    static GridMap CreateArena();
     static GridMap CreateDefault();
 
     TileType Get(int col, int row) const;
@@ -30,5 +32,7 @@ private:
 };
 
 const GridMap& DefaultGridMap();
+const GridMap& HubGridMap();
+const GridMap& ArenaGridMap();
 
 }  // namespace net

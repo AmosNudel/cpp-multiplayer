@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "common/protocol.hpp"
+#include "common/session.hpp"
 #include "server/tcp_listener.hpp"
 #include "server/ws_listener.hpp"
 
@@ -88,11 +89,22 @@ private:
     void HandleMessage(const IncomingMessage& incoming);
     void HandleDisconnect(int clientId, TransportKind transport);
     void SimulateTick();
+    void UpdateSession();
+    void HandleSetReady(int clientId, bool ready);
+    void StartArena();
+    void EndArena();
     void BroadcastWorldState();
     void BroadcastToAll(const Message& message);
     void RecordAndBroadcastChat(const ChatMessage& entry);
     bool SendToClient(int clientId, TransportKind transport, const Message& message);
-    std::vector<PlayerState> BuildPlayerSnapshot() const;
+    std::vector<PlayerState> BuildPlayerSnapshot(SceneId scene) const;
+    SessionSnapshot BuildSessionSnapshot() const;
+    WorldState BuildWorldStateForClient(int clientId) const;
+    int CountPlayersInScene(SceneId scene) const;
+    int CountReadyHubPlayers() const;
+    void ClearAllReady();
+    void ResetPlayerForScene(PlayerState& player, ConnectedClient* client, SceneId scene,
+                             int spawnCol, int spawnRow);
     uint32_t NowMs() const;
 
     TcpListener tcpListener_;
@@ -106,6 +118,8 @@ private:
     std::vector<EnemyState> enemies_;
     std::unordered_map<int, EnemyMovementState> enemyMovement_;
     std::vector<ChatMessage> chatHistory_;
+    SessionPhase sessionPhase_ = SessionPhase::HubIdle;
+    uint32_t sessionPhaseEndsAtTick_ = 0;
     uint32_t tick_ = 0;
     bool running_ = false;
 };
