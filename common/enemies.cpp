@@ -1,6 +1,7 @@
 #include "common/enemies.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <random>
 #include <utility>
 
@@ -28,6 +29,39 @@ bool IsCellOccupiedByEnemy(int col, int row, const std::vector<EnemyState>& enem
         }
     }
     return false;
+}
+
+bool IsFarEnoughFromEnemies(int col, int row, const std::vector<EnemyState>& enemies,
+                            int minSeparation, int excludeEnemyId = -1) {
+    for (const EnemyState& enemy : enemies) {
+        if (enemy.id == excludeEnemyId || !IsAlive(enemy.state)) {
+            continue;
+        }
+        if (ManhattanCellDistance(col, row, WorldToCellCol(enemy.x), WorldToCellRow(enemy.y)) <
+            minSeparation) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool IsValidGoblinSpawnCell(int col, int row, const GridMap& map, int playerSpawnCol,
+                            int playerSpawnRow, const std::vector<EnemyState>& enemies,
+                            int excludeEnemyId) {
+    if (!map.IsWalkable(col, row)) {
+        return false;
+    }
+    if (ManhattanCellDistance(col, row, playerSpawnCol, playerSpawnRow) <
+        kGoblinMinSpawnDistanceFromPlayer) {
+        return false;
+    }
+    if (IsCellOccupiedByEnemy(col, row, enemies, excludeEnemyId)) {
+        return false;
+    }
+    if (!IsFarEnoughFromEnemies(col, row, enemies, kGoblinMinSpawnSeparation, excludeEnemyId)) {
+        return false;
+    }
+    return true;
 }
 
 }  // namespace
@@ -95,12 +129,74 @@ std::pair<int, int> PickRandomGoblinSpawnCell(const GridMap& map,
 
     std::shuffle(candidates.begin(), candidates.end(), GoblinSpawnRng());
     for (const std::pair<int, int>& cell : candidates) {
-        if (!IsCellOccupiedByEnemy(cell.first, cell.second, enemies, excludeEnemyId)) {
+        if (IsValidGoblinSpawnCell(cell.first, cell.second, map, playerCol, playerRow, enemies,
+                                   excludeEnemyId)) {
             return cell;
         }
     }
 
+    for (const std::pair<int, int>& cell : candidates) {
+        if (IsCellOccupiedByEnemy(cell.first, cell.second, enemies, excludeEnemyId)) {
+            continue;
+        }
+        if (ManhattanCellDistance(cell.first, cell.second, playerCol, playerRow) <
+            kGoblinMinSpawnDistanceFromPlayer) {
+            continue;
+        }
+        return cell;
+    }
+
     return {kDefaultGoblinCol, kDefaultGoblinRow};
+}
+
+std::vector<std::pair<int, int>> BuildGoblinPatrolWaypoints(const GridMap& map, int anchorCol,
+                                                            int anchorRow) {
+    const int minCol = std::max(1, anchorCol - kGoblinPatrolRadius);
+    const int maxCol = std::min(kGridCols - 2, anchorCol + kGoblinPatrolRadius);
+    const int minRow = std::max(1, anchorRow - kGoblinPatrolRadius);
+    const int maxRow = std::min(kGridRows - 2, anchorRow + kGoblinPatrolRadius);
+
+    std::vector<std::pair<int, int>> corners = {
+        {minCol, minRow},
+        {maxCol, minRow},
+        {maxCol, maxRow},
+        {minCol, maxRow},
+    };
+
+    std::vector<std::pair<int, int>> waypoints;
+    for (const std::pair<int, int>& corner : corners) {
+        if (map.IsWalkable(corner.first, corner.second)) {
+            waypoints.push_back(corner);
+        }
+    }
+
+    if (waypoints.size() >= 2) {
+        return waypoints;
+    }
+
+    waypoints.clear();
+    for (int row = minRow; row <= maxRow; ++row) {
+        for (int col = minCol; col <= maxCol; ++col) {
+            if (!map.IsWalkable(col, row)) {
+                continue;
+            }
+            if (col == anchorCol && row == anchorRow) {
+                continue;
+            }
+            waypoints.emplace_back(col, row);
+        }
+    }
+
+    std::sort(waypoints.begin(), waypoints.end(),
+              [anchorCol, anchorRow](const std::pair<int, int>& a, const std::pair<int, int>& b) {
+                  const float angleA = std::atan2(static_cast<float>(a.second - anchorRow),
+                                                  static_cast<float>(a.first - anchorCol));
+                  const float angleB = std::atan2(static_cast<float>(b.second - anchorRow),
+                                                  static_cast<float>(b.first - anchorCol));
+                  return angleA < angleB;
+              });
+
+    return waypoints;
 }
 
 EnemyState CreateGoblinAt(int id, int col, int row) {
@@ -130,7 +226,8 @@ std::vector<EnemyState> CreateDefaultEnemies() {
         if (static_cast<int>(enemies.size()) >= kDefaultGoblinCount) {
             break;
         }
-        if (IsCellOccupiedByEnemy(cell.first, cell.second, enemies, -1)) {
+        if (!IsValidGoblinSpawnCell(cell.first, cell.second, map, playerCol, playerRow, enemies,
+                                    -1)) {
             continue;
         }
         enemies.push_back(

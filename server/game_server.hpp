@@ -32,6 +32,7 @@ struct EnemyMovementState {
     bool hasMoveTarget = false;
     std::vector<std::pair<int, int>> movePath;
     size_t pathIndex = 0;
+    std::vector<std::pair<int, int>> patrolWaypoints;
     size_t patrolWaypointIndex = 0;
     bool chasingPlayer = false;
     int chaseTargetId = -1;

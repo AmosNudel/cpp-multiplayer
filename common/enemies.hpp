@@ -22,10 +22,8 @@ inline constexpr int kDefaultGoblinRow = 7;
 inline constexpr int kDefaultGoblinId = 1;
 inline constexpr int kDefaultGoblinCount = 5;
 inline constexpr int kGoblinMinSpawnDistanceFromPlayer = 4;
-inline constexpr int kGoblinPatrolMinCol = 5;
-inline constexpr int kGoblinPatrolMaxCol = 9;
-inline constexpr int kGoblinPatrolMinRow = 5;
-inline constexpr int kGoblinPatrolMaxRow = 9;
+inline constexpr int kGoblinMinSpawnSeparation = 3;
+inline constexpr int kGoblinPatrolRadius = 2;
 inline constexpr int kGoblinAggroCellDistance = 1;
 inline constexpr int kGoblinPatrolIdleTicks = 60;
 
@@ -53,6 +51,8 @@ std::pair<int, int> PickRandomGoblinSpawnCell(const GridMap& map,
                                                const std::vector<EnemyState>& enemies,
                                                int excludeEnemyId = -1);
 bool EnemiesShareTiles(const std::vector<EnemyState>& enemies);
+std::vector<std::pair<int, int>> BuildGoblinPatrolWaypoints(const GridMap& map, int anchorCol,
+                                                             int anchorRow);
 std::vector<EnemyState> CreateDefaultEnemies();
 EnemyState CreateGoblinAt(int id, int col, int row);
 

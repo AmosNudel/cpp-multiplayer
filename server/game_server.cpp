@@ -95,36 +95,31 @@ void BeginPatrolIdle(EnemyState& enemy, EnemyMovementState& move, uint32_t tick)
                      EntityState::Idle, tick);
 }
 
-const std::vector<GridPoint>& GoblinPatrolWaypoints() {
-    static const std::vector<GridPoint> waypoints = []() {
-        const GridMap& map = DefaultGridMap();
-        std::vector<GridPoint> points;
-        static constexpr int kCorners[4][2] = {
-            {kGoblinPatrolMinCol, kGoblinPatrolMinRow},
-            {kGoblinPatrolMaxCol, kGoblinPatrolMinRow},
-            {kGoblinPatrolMaxCol, kGoblinPatrolMaxRow},
-            {kGoblinPatrolMinCol, kGoblinPatrolMaxRow},
-        };
-
-        for (const auto& corner : kCorners) {
-            if (map.IsWalkable(corner[0], corner[1])) {
-                points.emplace_back(corner[0], corner[1]);
-            }
+bool IsPatrolGoalBlocked(int col, int row, int enemyId, const std::vector<EnemyState>& enemies) {
+    for (const EnemyState& other : enemies) {
+        if (other.id == enemyId || !IsAlive(other.state)) {
+            continue;
         }
-
-        if (points.empty()) {
-            for (int col = kGoblinPatrolMinCol; col <= kGoblinPatrolMaxCol; ++col) {
-                for (int row = kGoblinPatrolMinRow; row <= kGoblinPatrolMaxRow; ++row) {
-                    if (map.IsWalkable(col, row)) {
-                        points.emplace_back(col, row);
-                    }
-                }
-            }
+        if (WorldToCellCol(other.x) == col && WorldToCellRow(other.y) == row) {
+            return true;
         }
+    }
+    return false;
+}
 
-        return points;
-    }();
-    return waypoints;
+void InitializeGoblinMovement(EnemyMovementState& move, const GridMap& map,
+                               const EnemyState& enemy, uint32_t tick) {
+    const int anchorCol = WorldToCellCol(enemy.x);
+    const int anchorRow = WorldToCellRow(enemy.y);
+    move.patrolWaypoints = BuildGoblinPatrolWaypoints(map, anchorCol, anchorRow);
+    if (!move.patrolWaypoints.empty()) {
+        move.patrolWaypointIndex = static_cast<size_t>(enemy.id) % move.patrolWaypoints.size();
+    } else {
+        move.patrolWaypointIndex = 0;
+    }
+    move.patrolIdleUntilTick =
+        tick + static_cast<uint32_t>(kGoblinPatrolIdleTicks) +
+        static_cast<uint32_t>((enemy.id % 4) * 15);
 }
 
 bool StartEnemyPath(EnemyState& enemy, EnemyMovementState& move, const GridMap& map, int goalCol,
@@ -457,18 +452,20 @@ bool StartGoblinChase(EnemyState& enemy, EnemyMovementState& move, PlayerState& 
 }
 
 bool StartNextPatrolLeg(EnemyState& enemy, EnemyMovementState& move, const GridMap& map,
-                        uint32_t tick) {
-    const std::vector<GridPoint>& waypoints = GoblinPatrolWaypoints();
-    if (waypoints.empty()) {
+                        const std::vector<EnemyState>& enemies, uint32_t tick) {
+    if (move.patrolWaypoints.empty()) {
         return false;
     }
 
     const size_t startIndex = move.patrolWaypointIndex;
-    for (size_t attempt = 0; attempt < waypoints.size(); ++attempt) {
-        move.patrolWaypointIndex = (startIndex + attempt) % waypoints.size();
-        const GridPoint& goal = waypoints[move.patrolWaypointIndex];
+    for (size_t attempt = 0; attempt < move.patrolWaypoints.size(); ++attempt) {
+        move.patrolWaypointIndex = (startIndex + attempt) % move.patrolWaypoints.size();
+        const GridPoint& goal = move.patrolWaypoints[move.patrolWaypointIndex];
+        if (IsPatrolGoalBlocked(goal.first, goal.second, enemy.id, enemies)) {
+            continue;
+        }
         if (StartEnemyPath(enemy, move, map, goal.first, goal.second, tick)) {
-            move.patrolWaypointIndex = (move.patrolWaypointIndex + 1) % waypoints.size();
+            move.patrolWaypointIndex = (move.patrolWaypointIndex + 1) % move.patrolWaypoints.size();
             return true;
         }
     }
@@ -791,16 +788,14 @@ void RespawnEnemy(int enemyId, std::vector<EnemyState>& enemies,
         spawned.stateStartTick = tick;
         spawned.animStartTick = tick;
         enemies.push_back(spawned);
-        enemyMovement[enemyId].patrolIdleUntilTick =
-            tick + static_cast<uint32_t>(kGoblinPatrolIdleTicks);
+        InitializeGoblinMovement(enemyMovement[enemyId], map, spawned, tick);
         return;
     }
 
     *enemy = CreateGoblinAt(enemyId, spawnCol, spawnRow);
     enemy->stateStartTick = tick;
     enemy->animStartTick = tick;
-    enemyMovement[enemyId].patrolIdleUntilTick =
-        tick + static_cast<uint32_t>(kGoblinPatrolIdleTicks);
+    InitializeGoblinMovement(enemyMovement[enemyId], map, *enemy, tick);
 }
 
 void TryCompletePendingEngage(ConnectedClient& client, PlayerState& player,
@@ -1059,7 +1054,7 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
 
     if (enemy.state == EntityState::Idle && !move.chasingPlayer && !move.hasMoveTarget &&
         !InPatrolIdle(move, tick)) {
-        StartNextPatrolLeg(enemy, move, map, tick);
+        StartNextPatrolLeg(enemy, move, map, enemies, tick);
     }
 }
 
@@ -1133,8 +1128,7 @@ bool GameServer::Start(uint16_t tcpPort, uint16_t wsPort) {
     for (EnemyState& enemy : enemies_) {
         enemy.stateStartTick = tick_;
         enemy.animStartTick = tick_;
-        enemyMovement_[enemy.id].patrolIdleUntilTick =
-            tick_ + static_cast<uint32_t>(kGoblinPatrolIdleTicks);
+        InitializeGoblinMovement(enemyMovement_[enemy.id], DefaultGridMap(), enemy, tick_);
     }
     return true;
 }
