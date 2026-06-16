@@ -34,6 +34,8 @@ inline constexpr int kAttackAnimTicksPerFrame = 2;
 inline constexpr int kComboPauseTicks = 4;
 inline constexpr int kHitFrameCount = 4;
 inline constexpr int kHitAnimTicksPerFrame = 2;
+inline constexpr int kJumpFrameCount = 5;
+inline constexpr int kJumpAnimTicksPerFrame = 2;
 inline constexpr int kDeadFrameCount = 1;
 inline constexpr int kDeadAnimTicksPerFrame = 1;
 inline constexpr int kMaxChatLength = 120;
@@ -45,6 +47,7 @@ enum class PlayerAnim {
     Attack2,
     Attack3,
     Hit,
+    Jump,
     Dead,
 };
 
@@ -56,6 +59,7 @@ inline const char* PlayerAnimName(PlayerAnim anim) {
         case PlayerAnim::Attack2: return "attack2";
         case PlayerAnim::Attack3: return "attack3";
         case PlayerAnim::Hit: return "hit";
+        case PlayerAnim::Jump: return "jump";
         case PlayerAnim::Dead: return "dead";
     }
     return "idle";
@@ -67,6 +71,7 @@ inline PlayerAnim ParsePlayerAnim(const std::string& value) {
     if (value == "attack2") return PlayerAnim::Attack2;
     if (value == "attack3") return PlayerAnim::Attack3;
     if (value == "hit") return PlayerAnim::Hit;
+    if (value == "jump") return PlayerAnim::Jump;
     if (value == "dead") return PlayerAnim::Dead;
     return PlayerAnim::Idle;
 }
@@ -79,6 +84,7 @@ inline int AnimFrameCount(PlayerAnim anim) {
         case PlayerAnim::Attack2: return kAttack2FrameCount;
         case PlayerAnim::Attack3: return kAttack3FrameCount;
         case PlayerAnim::Hit: return kHitFrameCount;
+        case PlayerAnim::Jump: return kJumpFrameCount;
         case PlayerAnim::Dead: return kDeadFrameCount;
     }
     return kIdleFrameCount;
@@ -93,6 +99,7 @@ inline int AnimTicksPerFrame(PlayerAnim anim) {
         case PlayerAnim::Attack3:
             return kAttackAnimTicksPerFrame;
         case PlayerAnim::Hit: return kHitAnimTicksPerFrame;
+        case PlayerAnim::Jump: return kJumpAnimTicksPerFrame;
         case PlayerAnim::Dead: return kDeadAnimTicksPerFrame;
     }
     return kIdleAnimTicksPerFrame;
@@ -125,7 +132,8 @@ inline int AnimFrameIndex(PlayerAnim anim, uint32_t serverTick, uint32_t animSta
     }
 
     const int frame = static_cast<int>(elapsed / static_cast<uint32_t>(ticksPerFrame));
-    if (IsAttackAnim(anim) || anim == PlayerAnim::Hit || anim == PlayerAnim::Dead) {
+    if (IsAttackAnim(anim) || anim == PlayerAnim::Hit || anim == PlayerAnim::Jump ||
+        anim == PlayerAnim::Dead) {
         return frame >= frameCount ? frameCount - 1 : frame;
     }
 

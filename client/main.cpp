@@ -31,6 +31,8 @@ static const char* kAttack2SpritePath =
     "assets/player_sprites/Sprites/without_outline/ATTACK 2.png";
 static const char* kAttack3SpritePath =
     "assets/player_sprites/Sprites/without_outline/ATTACK 3.png";
+static const char* kJumpSpritePath =
+    "assets/player_sprites/Sprites/with_outline/JUMP.png";
 static const char* kGoblinIdleSpritePath = "assets/enemy/Goblin/Idle.png";
 static const char* kGoblinRunSpritePath = "assets/enemy/Goblin/Run.png";
 static const char* kGoblinAttackSpritePath = "assets/enemy/Goblin/Attack.png";
@@ -109,6 +111,7 @@ struct PlayerSprites {
     SpriteSheet attack1;
     SpriteSheet attack2;
     SpriteSheet attack3;
+    SpriteSheet jump;
 
     void Load() {
         idle.Load(ResolveAssetPath(kIdleSpritePath).c_str(), net::kIdleFrameCount);
@@ -116,6 +119,7 @@ struct PlayerSprites {
         attack1.Load(ResolveAssetPath(kAttack1SpritePath).c_str(), net::kAttack1FrameCount);
         attack2.Load(ResolveAssetPath(kAttack2SpritePath).c_str(), net::kAttack2FrameCount);
         attack3.Load(ResolveAssetPath(kAttack3SpritePath).c_str(), net::kAttack3FrameCount);
+        jump.Load(ResolveAssetPath(kJumpSpritePath).c_str(), net::kJumpFrameCount);
     }
 
     void Unload() {
@@ -124,10 +128,12 @@ struct PlayerSprites {
         attack1.Unload();
         attack2.Unload();
         attack3.Unload();
+        jump.Unload();
     }
 
     bool AnyLoaded() const {
-        return idle.loaded || run.loaded || attack1.loaded || attack2.loaded || attack3.loaded;
+        return idle.loaded || run.loaded || attack1.loaded || attack2.loaded || attack3.loaded ||
+               jump.loaded;
     }
 
     const SpriteSheet* SheetForAnim(net::PlayerAnim anim) const {
@@ -136,6 +142,7 @@ struct PlayerSprites {
             case net::PlayerAnim::Attack1: return attack1.loaded ? &attack1 : nullptr;
             case net::PlayerAnim::Attack2: return attack2.loaded ? &attack2 : nullptr;
             case net::PlayerAnim::Attack3: return attack3.loaded ? &attack3 : nullptr;
+            case net::PlayerAnim::Jump: return jump.loaded ? &jump : nullptr;
             case net::PlayerAnim::Hit:
             case net::PlayerAnim::Dead:
             case net::PlayerAnim::Idle:

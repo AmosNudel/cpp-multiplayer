@@ -54,6 +54,11 @@ struct ConnectedClient {
     uint32_t comboPhaseStartTick = 0;
     bool comboSwingDamageDealt = false;
     uint32_t lastAttackTick = 0;
+    bool hasDisengageTarget = false;
+    float disengageStartX = 0.0f;
+    float disengageStartY = 0.0f;
+    float disengageTargetX = 0.0f;
+    float disengageTargetY = 0.0f;
 };
 
 class GameServer {

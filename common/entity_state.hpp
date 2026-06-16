@@ -11,6 +11,7 @@ enum class EntityState {
     Idle,
     Moving,
     Combat,
+    Disengaging,
     Hit,
     Dead,
 };
@@ -22,6 +23,7 @@ inline const char* EntityStateName(EntityState state) {
         case EntityState::Idle: return "idle";
         case EntityState::Moving: return "moving";
         case EntityState::Combat: return "combat";
+        case EntityState::Disengaging: return "disengaging";
         case EntityState::Hit: return "hit";
         case EntityState::Dead: return "dead";
     }
@@ -31,6 +33,7 @@ inline const char* EntityStateName(EntityState state) {
 inline EntityState ParseEntityState(const std::string& value) {
     if (value == "moving") return EntityState::Moving;
     if (value == "combat") return EntityState::Combat;
+    if (value == "disengaging") return EntityState::Disengaging;
     if (value == "hit") return EntityState::Hit;
     if (value == "dead") return EntityState::Dead;
     return EntityState::Idle;
@@ -42,6 +45,7 @@ inline PlayerAnim AnimForEntityState(EntityState state) {
         case EntityState::Hit: return PlayerAnim::Hit;
         case EntityState::Dead: return PlayerAnim::Dead;
         case EntityState::Combat: return PlayerAnim::Attack1;
+        case EntityState::Disengaging: return PlayerAnim::Jump;
         case EntityState::Idle:
         default: return PlayerAnim::Idle;
     }
@@ -50,11 +54,13 @@ inline PlayerAnim AnimForEntityState(EntityState state) {
 inline bool IsAlive(EntityState state) { return state != EntityState::Dead; }
 
 inline bool CanAcceptMoveIntent(EntityState state) {
-    return state != EntityState::Dead && state != EntityState::Hit;
+    return state != EntityState::Dead && state != EntityState::Hit &&
+           state != EntityState::Disengaging;
 }
 
 inline bool CanAcceptAttackIntent(EntityState state) {
-    return state != EntityState::Dead && state != EntityState::Hit;
+    return state != EntityState::Dead && state != EntityState::Hit &&
+           state != EntityState::Disengaging;
 }
 
 }  // namespace net

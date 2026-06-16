@@ -250,6 +250,10 @@ void ClearPlayerMove(ConnectedClient& client, PlayerState& player) {
     player.moveTargetRow = -1;
 }
 
+void ClearPlayerDisengage(ConnectedClient& client) {
+    client.hasDisengageTarget = false;
+}
+
 bool IsVoluntaryMove(const ConnectedClient& client, const PlayerState& player) {
     return client.hasMoveTarget && client.pendingAttackEnemyId < 0 && player.targetId < 0;
 }
@@ -556,7 +560,51 @@ void CancelPlayerCombat(PlayerState& player, ConnectedClient& client,
     client.pendingAttackEnemyId = -1;
     ResetPlayerCombo(client);
     ClearPlayerMove(client, player);
+    ClearPlayerDisengage(client);
     EndPlayerCombat(player, enemies, tick);
+}
+
+void StartPlayerDisengage(PlayerState& player, ConnectedClient& client, float targetX,
+                          float targetY, uint32_t tick) {
+    client.disengageStartX = player.x;
+    client.disengageStartY = player.y;
+    client.disengageTargetX = targetX;
+    client.disengageTargetY = targetY;
+    client.hasDisengageTarget = true;
+    ClearPlayerMove(client, player);
+    TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                     EntityState::Disengaging, tick);
+    SetEntityAnim(player.anim, player.animStartTick, PlayerAnim::Jump, tick);
+}
+
+void UpdatePlayerDisengage(PlayerState& player, ConnectedClient& client, uint32_t tick) {
+    if (!client.hasDisengageTarget) {
+        TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                         EntityState::Idle, tick);
+        return;
+    }
+
+    const int totalTicks = kJumpFrameCount * kJumpAnimTicksPerFrame;
+    const uint32_t elapsed = tick >= player.animStartTick ? tick - player.animStartTick : 0;
+    const float progress =
+        totalTicks > 0
+            ? std::min(1.0f, static_cast<float>(elapsed) / static_cast<float>(totalTicks))
+            : 1.0f;
+    player.x = client.disengageStartX +
+               (client.disengageTargetX - client.disengageStartX) * progress;
+    player.y = client.disengageStartY +
+               (client.disengageTargetY - client.disengageStartY) * progress;
+
+    if (!IsAnimFinished(PlayerAnim::Jump, tick, player.animStartTick)) {
+        return;
+    }
+
+    player.x = client.disengageTargetX;
+    player.y = client.disengageTargetY;
+    SnapEntityToCellCenter(player.x, player.y);
+    ClearPlayerDisengage(client);
+    TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                     EntityState::Idle, tick);
 }
 
 void DisengagePlayerCombat(PlayerState& player, ConnectedClient& client,
@@ -596,9 +644,9 @@ void DisengagePlayerCombat(PlayerState& player, ConnectedClient& client,
         return;
     }
 
-    player.x = CellCenterX(retreat->first);
-    player.y = CellCenterY(retreat->second);
     UpdateFacingFromDirection(player, enemyCol - retreat->first, enemyRow - retreat->second);
+    StartPlayerDisengage(player, client, CellCenterX(retreat->first), CellCenterY(retreat->second),
+                         tick);
 }
 
 void TryApplyComboSwingDamage(PlayerState& player, ConnectedClient& client, EnemyState& enemy,
@@ -885,6 +933,12 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
                         std::vector<EnemyState>& enemies, uint32_t tick) {
     if (player.state == EntityState::Dead) {
         ClearPlayerMove(client, player);
+        return;
+    }
+
+    if (player.state == EntityState::Disengaging) {
+        ClearPlayerMove(client, player);
+        UpdatePlayerDisengage(player, client, tick);
         return;
     }
 
@@ -1264,7 +1318,7 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             }
 
             PlayerState* player = FindPlayer(players_, incoming.clientId);
-            if (player == nullptr || player->state == EntityState::Dead) {
+            if (player == nullptr || !CanAcceptMoveIntent(player->state)) {
                 return;
             }
 
