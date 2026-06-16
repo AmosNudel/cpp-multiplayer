@@ -2,10 +2,12 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/config.hpp"
 #include "common/entity_state.hpp"
+#include "common/grid_map.hpp"
 
 namespace net {
 
@@ -18,6 +20,8 @@ inline constexpr float kGoblinSpriteHeight = 128.0f;
 inline constexpr int kDefaultGoblinCol = 7;
 inline constexpr int kDefaultGoblinRow = 7;
 inline constexpr int kDefaultGoblinId = 1;
+inline constexpr int kDefaultGoblinCount = 5;
+inline constexpr int kGoblinMinSpawnDistanceFromPlayer = 4;
 inline constexpr int kGoblinPatrolMinCol = 5;
 inline constexpr int kGoblinPatrolMaxCol = 9;
 inline constexpr int kGoblinPatrolMinRow = 5;
@@ -41,8 +45,15 @@ struct EnemyState {
     bool attackDamageDealt = false;
 };
 
+std::pair<int, int> ResolvePlayerSpawnCell(const GridMap& map);
+std::vector<std::pair<int, int>> CollectGoblinSpawnPoints(
+    const GridMap& map, int playerSpawnCol, int playerSpawnRow,
+    int minDistance = kGoblinMinSpawnDistanceFromPlayer);
+std::pair<int, int> PickRandomGoblinSpawnCell(const GridMap& map,
+                                               const std::vector<EnemyState>& enemies,
+                                               int excludeEnemyId = -1);
 std::vector<EnemyState> CreateDefaultEnemies();
-EnemyState CreateDefaultGoblin(int id = kDefaultGoblinId);
+EnemyState CreateGoblinAt(int id, int col, int row);
 
 inline int GoblinAnimFrameCount(PlayerAnim anim) {
     switch (anim) {

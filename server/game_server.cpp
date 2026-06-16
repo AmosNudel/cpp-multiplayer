@@ -731,9 +731,12 @@ void RespawnEnemy(int enemyId, std::vector<EnemyState>& enemies,
 
     enemyMovement.erase(enemyId);
 
+    const GridMap& map = DefaultGridMap();
+    const auto [spawnCol, spawnRow] = PickRandomGoblinSpawnCell(map, enemies, enemyId);
+
     EnemyState* enemy = FindEnemy(enemies, enemyId);
     if (enemy == nullptr) {
-        EnemyState spawned = CreateDefaultGoblin(enemyId);
+        EnemyState spawned = CreateGoblinAt(enemyId, spawnCol, spawnRow);
         spawned.stateStartTick = tick;
         spawned.animStartTick = tick;
         enemies.push_back(spawned);
@@ -742,7 +745,7 @@ void RespawnEnemy(int enemyId, std::vector<EnemyState>& enemies,
         return;
     }
 
-    *enemy = CreateDefaultGoblin(enemyId);
+    *enemy = CreateGoblinAt(enemyId, spawnCol, spawnRow);
     enemy->stateStartTick = tick;
     enemy->animStartTick = tick;
     enemyMovement[enemyId].patrolIdleUntilTick =
@@ -1176,21 +1179,7 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             transportByClientId_[incoming.clientId] = incoming.transport;
 
             const GridMap& map = DefaultGridMap();
-            int spawnCol = kGridCols / 2;
-            int spawnRow = kGridRows / 2;
-            if (!map.IsWalkable(spawnCol, spawnRow)) {
-                bool foundSpawn = false;
-                for (int row = 1; row < kGridRows - 1 && !foundSpawn; ++row) {
-                    for (int col = 1; col < kGridCols - 1; ++col) {
-                        if (map.IsWalkable(col, row)) {
-                            spawnCol = col;
-                            spawnRow = row;
-                            foundSpawn = true;
-                            break;
-                        }
-                    }
-                }
-            }
+            const auto [spawnCol, spawnRow] = ResolvePlayerSpawnCell(map);
 
             PlayerState player;
             player.id = incoming.clientId;
