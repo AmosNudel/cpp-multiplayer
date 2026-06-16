@@ -80,6 +80,14 @@ void TransitionEntityState(EntityState& state, uint32_t& stateStartTick, EntityS
 
 void SetEntityAnim(PlayerAnim& anim, uint32_t& animStartTick, PlayerAnim newAnim,
                    uint32_t tick) {
+    if (anim != newAnim) {
+        anim = newAnim;
+        animStartTick = tick;
+    }
+}
+
+void RestartEntityAnim(PlayerAnim& anim, uint32_t& animStartTick, PlayerAnim newAnim,
+                       uint32_t tick) {
     anim = newAnim;
     animStartTick = tick;
 }

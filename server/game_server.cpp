@@ -164,7 +164,7 @@ void StartPlayerComboPhase(PlayerState& player, ConnectedClient& client, PlayerC
     client.comboPhase = phase;
     client.comboPhaseStartTick = tick;
     client.comboSwingDamageDealt = false;
-    SetEntityAnim(player.anim, player.animStartTick, anim, tick);
+    RestartEntityAnim(player.anim, player.animStartTick, anim, tick);
 }
 
 PlayerAnim AnimForComboPhase(PlayerComboPhase phase) {
@@ -320,8 +320,7 @@ void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
     }
 }
 
-bool TryPerformEnemyAttack(EnemyState& enemy, std::vector<PlayerState>& players,
-                           std::unordered_map<int, ConnectedClient>& clients, uint32_t tick) {
+bool TryPerformEnemyAttack(EnemyState& enemy, std::vector<PlayerState>& players, uint32_t tick) {
     if (enemy.state != EntityState::Combat || enemy.targetId < 0) {
         return false;
     }
@@ -331,7 +330,7 @@ bool TryPerformEnemyAttack(EnemyState& enemy, std::vector<PlayerState>& players,
         return false;
     }
 
-    if (player->state == EntityState::Combat && IsAttackAnim(player->anim)) {
+    if (player->state == EntityState::Combat) {
         return false;
     }
 
@@ -348,11 +347,6 @@ bool TryPerformEnemyAttack(EnemyState& enemy, std::vector<PlayerState>& players,
     SetEntityAnim(enemy.anim, enemy.animStartTick, PlayerAnim::Attack1, tick);
 
     if (PlayerState* mutablePlayer = FindPlayer(players, enemy.targetId)) {
-        if (mutablePlayer->state == EntityState::Combat) {
-            if (auto clientIt = clients.find(enemy.targetId); clientIt != clients.end()) {
-                ResetPlayerCombo(clientIt->second);
-            }
-        }
         ApplyDamageToPlayer(*mutablePlayer, kGoblinAttackDamage, tick);
     }
     return true;
@@ -433,10 +427,6 @@ bool StepPlayerMovement(PlayerState& player, ConnectedClient& client, uint32_t t
         }
     }
 
-    if (moved && player.state == EntityState::Moving) {
-        SetEntityAnim(player.anim, player.animStartTick, PlayerAnim::Run, tick);
-    }
-
     return moved;
 }
 
@@ -490,8 +480,7 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
     }
 }
 
-void UpdateEnemyEntity(EnemyState& enemy, std::vector<PlayerState>& players,
-                       std::unordered_map<int, ConnectedClient>& clients, uint32_t tick) {
+void UpdateEnemyEntity(EnemyState& enemy, std::vector<PlayerState>& players, uint32_t tick) {
     if (enemy.state == EntityState::Dead) {
         return;
     }
@@ -530,7 +519,7 @@ void UpdateEnemyEntity(EnemyState& enemy, std::vector<PlayerState>& players,
             return;
         }
 
-        TryPerformEnemyAttack(enemy, players, clients, tick);
+        TryPerformEnemyAttack(enemy, players, tick);
     }
 }
 
@@ -759,6 +748,7 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
 
             ConnectedClient& client = it->second;
             EndPlayerCombat(*player, enemies_, tick_);
+            ResetPlayerCombo(client);
             client.pendingAttackEnemyId = -1;
             player->targetId = -1;
             ClearPlayerMove(client, *player);
@@ -869,7 +859,7 @@ void GameServer::SimulateTick() {
     }
 
     for (EnemyState& enemy : enemies_) {
-        UpdateEnemyEntity(enemy, players_, clients_, tick_);
+        UpdateEnemyEntity(enemy, players_, tick_);
     }
 }
 

@@ -28,6 +28,9 @@ void TransitionEntityState(EntityState& state, uint32_t& stateStartTick, EntityS
 void SetEntityAnim(PlayerAnim& anim, uint32_t& animStartTick, PlayerAnim newAnim,
                    uint32_t tick);
 
+void RestartEntityAnim(PlayerAnim& anim, uint32_t& animStartTick, PlayerAnim newAnim,
+                      uint32_t tick);
+
 int CurrentAnimFrame(PlayerAnim anim, uint32_t tick, uint32_t animStartTick);
 bool IsAnimFinished(PlayerAnim anim, uint32_t tick, uint32_t animStartTick);
 
