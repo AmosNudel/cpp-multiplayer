@@ -29,11 +29,10 @@ int main() {
     if (ports.tcp == ports.ws) {
         std::cerr << "\nError: TCP and WebSocket cannot use the same port ("
                   << ports.tcp << ").\n";
-        std::cerr << "On Railway:\n";
-        std::cerr << "  - Keep TCP_PORT=7777 (or use RAILWAY_TCP_APPLICATION_PORT)\n";
-        std::cerr << "  - DELETE the WS_PORT variable entirely\n";
-        std::cerr << "  - Let Railway inject PORT automatically (your domain port, e.g. 8080)\n";
-        std::cerr << "  - Do not set PORT or WS_PORT to 7777\n";
+        std::cerr << "On Railway with TCP proxy enabled, PORT is often 7777.\n";
+        std::cerr << "Set WS_PORT to your domain target port (e.g. 8080):\n";
+        std::cerr << "  TCP_PORT=7777\n";
+        std::cerr << "  WS_PORT=8080\n";
         return 1;
     }
 
