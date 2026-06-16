@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <chrono>
 
+#include "common/config.hpp"
+
 namespace net {
 namespace {
 
@@ -156,6 +158,7 @@ void GameClient::HandleMessage(const Message& message) {
         case MessageType::JoinAccepted:
             localPlayerId_ = message.joinAccepted.playerId;
             players_ = message.joinAccepted.players;
+            chatLog_.clear();
             SetState(ClientConnectionState::Joined, "Joined game");
             break;
         case MessageType::JoinRejected:
@@ -185,11 +188,14 @@ void GameClient::HandleMessage(const Message& message) {
                 break;
             }
             chatLog_.push_back(message.chat);
-            if (chatLog_.size() > 8) {
+            if (static_cast<int>(chatLog_.size()) > kMaxChatHistory) {
                 chatLog_.erase(chatLog_.begin());
             }
             break;
         }
+        case MessageType::ChatHistory:
+            chatLog_ = message.chatHistory.messages;
+            break;
         default:
             break;
     }

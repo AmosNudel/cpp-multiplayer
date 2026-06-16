@@ -25,6 +25,26 @@ PlayerState PlayerStateFromJson(const nlohmann::json& json) {
     return player;
 }
 
+nlohmann::json ChatMessageToJson(const ChatMessage& chat) {
+    nlohmann::json json;
+    if (chat.playerId != 0) {
+        json["player_id"] = chat.playerId;
+    }
+    if (!chat.name.empty()) {
+        json["name"] = chat.name;
+    }
+    json["text"] = chat.text;
+    return json;
+}
+
+ChatMessage ChatMessageFromJson(const nlohmann::json& json) {
+    ChatMessage chat;
+    chat.playerId = json.value("player_id", 0);
+    chat.name = json.value("name", "");
+    chat.text = json.at("text").get<std::string>();
+    return chat;
+}
+
 }  // namespace
 
 const char* MessageTypeName(MessageType type) {
@@ -38,6 +58,7 @@ const char* MessageTypeName(MessageType type) {
         case MessageType::Ping: return "ping";
         case MessageType::Pong: return "pong";
         case MessageType::Chat: return "chat";
+        case MessageType::ChatHistory: return "chat_history";
     }
     return "unknown";
 }
@@ -52,6 +73,7 @@ MessageType ParseMessageType(const std::string& value) {
     if (value == "ping") return MessageType::Ping;
     if (value == "pong") return MessageType::Pong;
     if (value == "chat") return MessageType::Chat;
+    if (value == "chat_history") return MessageType::ChatHistory;
     return MessageType::JoinRequest;
 }
 
@@ -130,6 +152,13 @@ Message MakeChatBroadcast(int playerId, const std::string& name, const std::stri
     return message;
 }
 
+Message MakeChatHistory(const std::vector<ChatMessage>& messages) {
+    Message message;
+    message.type = MessageType::ChatHistory;
+    message.chatHistory.messages = messages;
+    return message;
+}
+
 std::string SerializeMessage(const Message& message) {
     nlohmann::json json;
     json["type"] = MessageTypeName(message.type);
@@ -172,13 +201,14 @@ std::string SerializeMessage(const Message& message) {
             json["server_time_ms"] = message.pong.serverTimeMs;
             break;
         case MessageType::Chat:
-            if (message.chat.playerId != 0) {
-                json["player_id"] = message.chat.playerId;
+            json = ChatMessageToJson(message.chat);
+            json["type"] = MessageTypeName(message.type);
+            break;
+        case MessageType::ChatHistory:
+            json["messages"] = nlohmann::json::array();
+            for (const ChatMessage& chat : message.chatHistory.messages) {
+                json["messages"].push_back(ChatMessageToJson(chat));
             }
-            if (!message.chat.name.empty()) {
-                json["name"] = message.chat.name;
-            }
-            json["text"] = message.chat.text;
             break;
     }
 
@@ -227,9 +257,12 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
                 message.pong.serverTimeMs = json.at("server_time_ms").get<uint32_t>();
                 break;
             case MessageType::Chat:
-                message.chat.playerId = json.value("player_id", 0);
-                message.chat.name = json.value("name", "");
-                message.chat.text = json.at("text").get<std::string>();
+                message.chat = ChatMessageFromJson(json);
+                break;
+            case MessageType::ChatHistory:
+                for (const auto& chatJson : json.at("messages")) {
+                    message.chatHistory.messages.push_back(ChatMessageFromJson(chatJson));
+                }
                 break;
         }
 

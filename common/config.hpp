@@ -21,6 +21,8 @@ inline constexpr float kWorldHeight = 600.0f;
 inline constexpr float kPlayerSpeed = 200.0f;
 inline constexpr float kPlayerRadius = 16.0f;
 inline constexpr int kMaxChatLength = 120;
+inline constexpr int kMaxChatHistory = 8;
+inline constexpr int kServerChatPlayerId = 0;
 
 inline uint16_t EnvPort(const char* name, uint16_t fallback) {
     const char* value = std::getenv(name);

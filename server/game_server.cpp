@@ -70,6 +70,7 @@ void GameServer::Stop() {
     clients_.clear();
     transportByClientId_.clear();
     players_.clear();
+    chatHistory_.clear();
 }
 
 void GameServer::Run() {
@@ -162,6 +163,10 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
 
             SendToClient(incoming.clientId, incoming.transport,
                          MakeJoinAccepted(incoming.clientId, BuildPlayerSnapshot()));
+            if (!chatHistory_.empty()) {
+                SendToClient(incoming.clientId, incoming.transport,
+                             MakeChatHistory(chatHistory_));
+            }
             std::cout << "[game] " << client.name << " joined as client "
                       << incoming.clientId << "\n";
             break;
@@ -190,9 +195,12 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
                 return;
             }
 
-            const Message chat = MakeChatBroadcast(
-                incoming.clientId, it->second.name, text);
-            BroadcastToAll(chat);
+            const ChatMessage entry{
+                incoming.clientId,
+                it->second.name,
+                text,
+            };
+            RecordAndBroadcastChat(entry);
             std::cout << "[chat] " << it->second.name << ": " << text << "\n";
             break;
         }
@@ -249,6 +257,14 @@ void GameServer::SimulateTick() {
 
 void GameServer::BroadcastWorldState() {
     BroadcastToAll(MakeWorldState(tick_, players_));
+}
+
+void GameServer::RecordAndBroadcastChat(const ChatMessage& entry) {
+    chatHistory_.push_back(entry);
+    if (static_cast<int>(chatHistory_.size()) > kMaxChatHistory) {
+        chatHistory_.erase(chatHistory_.begin());
+    }
+    BroadcastToAll(MakeChatBroadcast(entry.playerId, entry.name, entry.text));
 }
 
 void GameServer::BroadcastToAll(const Message& message) {
