@@ -7,6 +7,7 @@ namespace net {
 
 TcpClient::~TcpClient() {
     Disconnect();
+    ShutdownSockets();
 }
 
 bool TcpClient::Connect(const std::string& host, uint16_t port) {
@@ -69,8 +70,6 @@ void TcpClient::Disconnect() {
         std::lock_guard<std::mutex> lock(incomingMutex_);
         incoming_.clear();
     }
-
-    ShutdownSockets();
 }
 
 bool TcpClient::Send(const Message& message) {

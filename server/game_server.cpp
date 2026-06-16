@@ -111,6 +111,9 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             if (static_cast<int>(players_.size()) >= kMaxPlayers) {
                 SendToClient(incoming.clientId, incoming.transport,
                              MakeJoinRejected("Server is full"));
+                if (incoming.transport == TransportKind::Tcp) {
+                    tcpListener_.DisconnectClient(incoming.clientId);
+                }
                 return;
             }
 
@@ -158,6 +161,11 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
 
 void GameServer::HandleDisconnect(int clientId, TransportKind transport) {
     (void)transport;
+    if (clients_.find(clientId) == clients_.end() &&
+        transportByClientId_.find(clientId) == transportByClientId_.end()) {
+        return;
+    }
+
     clients_.erase(clientId);
     transportByClientId_.erase(clientId);
     players_.erase(
@@ -207,6 +215,9 @@ void GameServer::BroadcastWorldState() {
     }
 
     for (const auto& [clientId, transport] : recipients) {
+        if (transportByClientId_.find(clientId) == transportByClientId_.end()) {
+            continue;
+        }
         if (!SendToClient(clientId, transport, state)) {
             EnqueueDisconnect(clientId, transport);
         }

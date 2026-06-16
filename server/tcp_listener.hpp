@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -23,6 +24,7 @@ public:
     bool Start(uint16_t port, MessageHandler onMessage, DisconnectHandler onDisconnect);
     void Stop();
     bool SendTo(int clientId, const Message& message);
+    void DisconnectClient(int clientId);
     bool IsRunning() const { return running_; }
 
 private:
@@ -30,7 +32,6 @@ private:
         int id = 0;
         SocketHandle socket = kInvalidSocket;
         std::string receiveBuffer;
-        std::thread thread;
         std::atomic<bool> alive{true};
     };
 

@@ -66,6 +66,21 @@ void TcpListener::Stop() {
     }
 
     running_ = false;
+
+    std::vector<std::shared_ptr<Client>> clientsCopy;
+    {
+        std::lock_guard<std::mutex> lock(clientsMutex_);
+        clientsCopy = clients_;
+        for (const auto& client : clientsCopy) {
+            client->alive = false;
+            if (client->socket != kInvalidSocket) {
+                CloseSocket(client->socket);
+                client->socket = kInvalidSocket;
+            }
+        }
+        clients_.clear();
+    }
+
     if (listenSocket_ != kInvalidSocket) {
         CloseSocket(listenSocket_);
         listenSocket_ = kInvalidSocket;
@@ -74,25 +89,6 @@ void TcpListener::Stop() {
     if (acceptThread_.joinable()) {
         acceptThread_.join();
     }
-
-    std::vector<std::shared_ptr<Client>> clientsCopy;
-    {
-        std::lock_guard<std::mutex> lock(clientsMutex_);
-        clientsCopy = clients_;
-        clients_.clear();
-    }
-
-    for (const auto& client : clientsCopy) {
-        client->alive = false;
-        if (client->socket != kInvalidSocket) {
-            CloseSocket(client->socket);
-        }
-        if (client->thread.joinable()) {
-            client->thread.join();
-        }
-    }
-
-    ShutdownSockets();
 }
 
 bool TcpListener::SendTo(int clientId, const Message& message) {
@@ -116,6 +112,29 @@ bool TcpListener::SendTo(int clientId, const Message& message) {
     return SendAll(client->socket, frame.data(), frame.size());
 }
 
+void TcpListener::DisconnectClient(int clientId) {
+    std::shared_ptr<Client> client;
+    {
+        std::lock_guard<std::mutex> lock(clientsMutex_);
+        for (const auto& entry : clients_) {
+            if (entry->id == clientId) {
+                client = entry;
+                break;
+            }
+        }
+    }
+
+    if (!client) {
+        return;
+    }
+
+    client->alive = false;
+    if (client->socket != kInvalidSocket) {
+        CloseSocket(client->socket);
+        client->socket = kInvalidSocket;
+    }
+}
+
 void TcpListener::AcceptLoop() {
     while (running_) {
         sockaddr_in clientAddress{};
@@ -132,8 +151,6 @@ void TcpListener::AcceptLoop() {
             continue;
         }
 
-        SetSocketNonBlocking(clientSocket);
-
         auto client = std::make_shared<Client>();
         {
             std::lock_guard<std::mutex> lock(clientsMutex_);
@@ -143,7 +160,7 @@ void TcpListener::AcceptLoop() {
         }
 
         std::cout << "[tcp] client " << client->id << " connected\n";
-        client->thread = std::thread(&TcpListener::ClientLoop, this, client);
+        std::thread(&TcpListener::ClientLoop, this, client).detach();
     }
 }
 

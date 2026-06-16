@@ -66,15 +66,7 @@ bool RecvSome(SocketHandle socket, std::string& buffer) {
         buffer.append(chunk, static_cast<size_t>(received));
         return true;
     }
-    if (received == 0) {
-        return false;
-    }
-#ifdef _WIN32
-    const int err = WSAGetLastError();
-    return err == WSAEWOULDBLOCK;
-#else
-    return errno == EAGAIN || errno == EWOULDBLOCK;
-#endif
+    return received != 0;
 }
 
 }  // namespace net
