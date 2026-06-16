@@ -4,7 +4,9 @@
 
 struct GameViewport {
     static constexpr int kVirtualWidth = 960;
-    static constexpr int kVirtualHeight = 640;
+    static constexpr int kHudHeight = 168;
+    static constexpr int kBottomBarHeight = 192;
+    static constexpr int kVirtualHeight = kHudHeight + 600 + kBottomBarHeight;
 
     void Init();
     void Shutdown();

@@ -18,8 +18,11 @@ static const char* kIdleSpritePath =
 static const char* kRunSpritePath =
     "assets/player_sprites/Sprites/with_outline/RUN.png";
 static const float kPlayerSpriteHeight = 96.0f;
-static const float kWorldScreenOriginX = 80.0f;
-static const float kWorldScreenOriginY = 80.0f;
+static constexpr int kSidePadding = 80;
+static constexpr float kWorldScreenOriginX = static_cast<float>(kSidePadding);
+static constexpr float kWorldScreenOriginY = static_cast<float>(GameViewport::kHudHeight);
+static constexpr float kGridScreenBottom =
+    kWorldScreenOriginY + net::kWorldHeight;
 
 static std::string ResolveAssetPath(const char* relativePath) {
     const std::string relative = relativePath;
@@ -150,17 +153,35 @@ static Vector2 GetVirtualMousePosition() {
 }
 
 static Rectangle ChatPanelRect() {
-    const float panelY = gChatExpanded
-                             ? static_cast<float>(GameViewport::kVirtualHeight - kChatExpandedH)
-                             : static_cast<float>(GameViewport::kVirtualHeight - kChatCollapsedH);
     const float panelH = gChatExpanded ? static_cast<float>(kChatExpandedH)
                                        : static_cast<float>(kChatCollapsedH);
+    const float panelY = static_cast<float>(GameViewport::kVirtualHeight) - panelH - 12.0f;
     return {
         static_cast<float>(kChatPanelX),
         panelY,
         static_cast<float>(kChatPanelW),
         panelH,
     };
+}
+
+static Rectangle GridScreenRect() {
+    return {
+        kWorldScreenOriginX,
+        kWorldScreenOriginY,
+        net::kWorldWidth,
+        net::kWorldHeight,
+    };
+}
+
+static void DrawUiChrome() {
+    DrawRectangle(0, 0, GameViewport::kVirtualWidth, GameViewport::kHudHeight,
+                  Color{24, 26, 32, 255});
+    DrawRectangle(0, static_cast<int>(kGridScreenBottom), GameViewport::kVirtualWidth,
+                  GameViewport::kBottomBarHeight, Color{24, 26, 32, 255});
+    DrawLine(0, GameViewport::kHudHeight, GameViewport::kVirtualWidth, GameViewport::kHudHeight,
+             Color{52, 58, 72, 255});
+    DrawLine(0, static_cast<int>(kGridScreenBottom), GameViewport::kVirtualWidth,
+             static_cast<int>(kGridScreenBottom), Color{52, 58, 72, 255});
 }
 
 static Rectangle ChatToggleButtonRect() {
@@ -282,12 +303,12 @@ static Rectangle CellScreenRect(int col, int row) {
 }
 
 static bool TryGetWorldCellFromVirtual(Vector2 virtualPos, int& col, int& row) {
-    const float worldX = virtualPos.x - kWorldScreenOriginX;
-    const float worldY = virtualPos.y - kWorldScreenOriginY;
-    if (worldX < 0.0f || worldY < 0.0f || worldX >= net::kWorldWidth ||
-        worldY >= net::kWorldHeight) {
+    if (!CheckCollisionPointRec(virtualPos, GridScreenRect())) {
         return false;
     }
+
+    const float worldX = virtualPos.x - kWorldScreenOriginX;
+    const float worldY = virtualPos.y - kWorldScreenOriginY;
 
     col = net::WorldToCellCol(worldX);
     row = net::WorldToCellRow(worldY);
@@ -295,6 +316,10 @@ static bool TryGetWorldCellFromVirtual(Vector2 virtualPos, int& col, int& row) {
 }
 
 static void HandleMapClick() {
+    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        return;
+    }
+
     const Vector2 screenPos = GetMousePosition();
     if (!gViewport.ContainsScreenPoint(screenPos)) {
         return;
@@ -590,6 +615,8 @@ static void DrawPlayer(const net::PlayerState& player, Color color, float nameOf
 
 static void DrawGame() {
     gViewport.BeginFrame();
+
+    DrawUiChrome();
 
     DrawRectangle(static_cast<int>(kWorldScreenOriginX),
                   static_cast<int>(kWorldScreenOriginY),
