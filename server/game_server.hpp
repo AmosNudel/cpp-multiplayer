@@ -59,6 +59,8 @@ struct ConnectedClient {
     float disengageStartY = 0.0f;
     float disengageTargetX = 0.0f;
     float disengageTargetY = 0.0f;
+    int pendingMoveCol = -1;
+    int pendingMoveRow = -1;
 };
 
 class GameServer {

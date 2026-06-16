@@ -63,4 +63,12 @@ inline bool CanAcceptAttackIntent(EntityState state) {
            state != EntityState::Disengaging;
 }
 
+inline bool CanAcceptDisengageIntent(EntityState state) {
+    return state == EntityState::Combat;
+}
+
+inline bool IsLeavingCombat(EntityState state) {
+    return state == EntityState::Disengaging;
+}
+
 }  // namespace net
