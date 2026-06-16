@@ -9,6 +9,8 @@
 #include "common/combat.hpp"
 #include "common/config.hpp"
 #include "common/enemies.hpp"
+#include "common/entity_defs.hpp"
+#include "common/entity_registry.hpp"
 #include "common/entity_state.hpp"
 #include "common/grid.hpp"
 #include "common/grid_map.hpp"
@@ -549,9 +551,10 @@ void TryApplyComboSwingDamage(PlayerState& player, ConnectedClient& client, Enem
     }
 
     client.comboSwingDamageDealt = true;
+    const CombatStats& playerStats = DefaultEntityRegistry().StatsFor(kPlayerEntityId);
     const bool critical =
-        RollCriticalHit(player.id, enemy.id, tick, kPlayerCritChancePercent);
-    const int damage = PlayerAttackDamage(critical);
+        RollCriticalHit(player.id, enemy.id, tick, playerStats.critChancePercent);
+    const int damage = ComputeAttackDamage(playerStats, critical);
     ApplyDamageToEnemy(enemy, damage, tick, critical);
     if (!IsAlive(enemy.state)) {
         player.targetId = -1;
@@ -631,6 +634,8 @@ void UpdateGoblinCombat(EnemyState& enemy, std::vector<PlayerState>& players, ui
         return;
     }
 
+    const CombatStats& stats = DefaultEntityRegistry().StatsFor(enemy.kind);
+
     const PlayerState* player = FindPlayerConst(players, enemy.targetId);
     if (player == nullptr || !IsAlive(player->state) || player->state == EntityState::Hit) {
         return;
@@ -654,7 +659,7 @@ void UpdateGoblinCombat(EnemyState& enemy, std::vector<PlayerState>& players, ui
             if (frame == kGoblinAttackDamageFrame) {
                 enemy.attackDamageDealt = true;
                 if (PlayerState* mutablePlayer = FindPlayer(players, enemy.targetId)) {
-                    ApplyDamageToPlayer(*mutablePlayer, kGoblinAttackDamage, tick, false);
+                    ApplyDamageToPlayer(*mutablePlayer, stats.attackDamage, tick, false);
                 }
             }
         }
@@ -667,7 +672,7 @@ void UpdateGoblinCombat(EnemyState& enemy, std::vector<PlayerState>& players, ui
         return;
     }
 
-    if (tick - enemy.lastAttackTick < static_cast<uint32_t>(kGoblinAttackCooldownTicks)) {
+    if (tick - enemy.lastAttackTick < static_cast<uint32_t>(stats.attackCooldownTicks)) {
         return;
     }
 
@@ -811,7 +816,8 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
 
     if (player.state == EntityState::Hit) {
         ClearPlayerMove(client, player);
-        if (tick - player.stateStartTick >= static_cast<uint32_t>(kHitStunTicks)) {
+        const CombatStats& stats = DefaultEntityRegistry().StatsFor(kPlayerEntityId);
+        if (tick - player.stateStartTick >= static_cast<uint32_t>(stats.hitStunTicks)) {
             if (player.hp <= 0) {
                 TransitionEntity(player.state, player.stateStartTick, player.anim,
                                  player.animStartTick, EntityState::Dead, tick);
@@ -851,7 +857,8 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
     if (enemy.state == EntityState::Hit) {
         ClearEnemyMove(move);
         ClearEnemyChase(move);
-        if (tick - enemy.stateStartTick >= static_cast<uint32_t>(kHitStunTicks)) {
+        const CombatStats& stats = DefaultEntityRegistry().StatsFor(enemy.kind);
+        if (tick - enemy.stateStartTick >= static_cast<uint32_t>(stats.hitStunTicks)) {
             if (enemy.hp <= 0) {
                 TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim,
                                  enemy.animStartTick, EntityState::Dead, tick);
@@ -1002,6 +1009,7 @@ bool GameServer::Start(uint16_t tcpPort, uint16_t wsPort) {
     }
 
     running_ = true;
+    InitializeEntityRegistry();
     enemies_ = CreateDefaultEnemies();
     for (EnemyState& enemy : enemies_) {
         enemy.stateStartTick = tick_;
@@ -1133,8 +1141,9 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
                 tick_ + static_cast<uint32_t>(incoming.clientId % kIdleFrameCount) *
                             static_cast<uint32_t>(kIdleAnimTicksPerFrame);
             player.animStartTick = player.stateStartTick;
-            player.hp = kPlayerMaxHp;
-            player.shield = kPlayerMaxShield;
+            const CombatStats& playerStats = DefaultEntityRegistry().StatsFor(kPlayerEntityId);
+            player.hp = playerStats.maxHp;
+            player.shield = playerStats.maxShield;
             player.moveTargetCol = -1;
             player.moveTargetRow = -1;
             players_.push_back(player);

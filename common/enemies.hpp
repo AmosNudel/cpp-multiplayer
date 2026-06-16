@@ -35,7 +35,7 @@ struct EnemyState {
     PlayerAnim anim = PlayerAnim::Idle;
     uint32_t animStartTick = 0;
     bool facingRight = true;
-    int hp = kGoblinMaxHp;
+    int hp = 0;
     int targetId = -1;
     uint32_t lastAttackTick = 0;
     bool attackDamageDealt = false;

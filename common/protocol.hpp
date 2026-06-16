@@ -54,8 +54,8 @@ struct PlayerState {
     PlayerAnim anim = PlayerAnim::Idle;
     uint32_t animStartTick = 0;
     bool facingRight = true;
-    int hp = kPlayerMaxHp;
-    int shield = kPlayerMaxShield;
+    int hp = 0;
+    int shield = 0;
     int targetId = -1;
     int moveTargetCol = -1;
     int moveTargetRow = -1;

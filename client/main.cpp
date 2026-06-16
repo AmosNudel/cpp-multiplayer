@@ -12,6 +12,8 @@
 #include "client/world_view.hpp"
 #include "common/config.hpp"
 #include "common/enemies.hpp"
+#include "common/entity_defs.hpp"
+#include "common/entity_registry.hpp"
 #include "common/entity_state.hpp"
 #include "common/grid.hpp"
 #include "common/grid_map.hpp"
@@ -818,8 +820,9 @@ static void DrawPlayerBars(const net::PlayerState& player, Vector2 center) {
     if (player.state == net::EntityState::Dead) {
         return;
     }
-    DrawEntityShieldBar(center, player.shield, net::kPlayerMaxShield, kPlayerSpriteHeight);
-    DrawEntityHpBar(center, player.hp, net::kPlayerMaxHp, kPlayerSpriteHeight);
+    const net::EntityDef& def = net::DefaultEntityRegistry().MustFind(net::kPlayerEntityId);
+    DrawEntityShieldBar(center, player.shield, def.stats.maxShield, def.spriteHeight);
+    DrawEntityHpBar(center, player.hp, def.stats.maxHp, def.spriteHeight);
 }
 
 static void DrawPlayerSprite(const net::PlayerState& player, Color color) {
@@ -840,13 +843,14 @@ static void DrawEnemy(const net::EnemyState& enemy) {
     const Vector2 center = {enemy.x, enemy.y};
     gGoblinSprites.Draw(enemy, gClient.GetServerTick(), center);
     if (enemy.state != net::EntityState::Dead) {
-        DrawEntityHpBar(center, enemy.hp, net::kGoblinMaxHp, net::kGoblinSpriteHeight);
+        const net::EntityDef& def = net::DefaultEntityRegistry().MustFind(enemy.kind);
+        DrawEntityHpBar(center, enemy.hp, def.stats.maxHp, def.spriteHeight);
     }
 }
 
 static void DrawEnemies() {
     for (const net::EnemyState& enemy : gClient.GetEnemies()) {
-        if (enemy.kind == "goblin") {
+        if (enemy.kind == net::kGoblinEntityId) {
             DrawEnemy(enemy);
         }
     }
@@ -941,6 +945,7 @@ static void MainLoop() {
 
 int main() {
     InitGameWindow("Multiplayer Game");
+    net::InitializeEntityRegistry();
     gViewport.Init();
     gPlayerSprites.Load();
     gGoblinSprites.Load();
@@ -954,6 +959,7 @@ int main() {
 #else
 int main() {
     InitGameWindow("Multiplayer Game");
+    net::InitializeEntityRegistry();
     gViewport.Init();
     gPlayerSprites.Load();
     gGoblinSprites.Load();

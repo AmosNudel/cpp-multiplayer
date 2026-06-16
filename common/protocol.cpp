@@ -4,6 +4,9 @@
 #include <array>
 #include <cstring>
 
+#include "common/entity_defs.hpp"
+#include "common/entity_registry.hpp"
+
 namespace net {
 namespace {
 
@@ -42,8 +45,8 @@ PlayerState PlayerStateFromJson(const nlohmann::json& json) {
     player.anim = ParsePlayerAnim(json.value("anim", "idle"));
     player.animStartTick = json.value("anim_start_tick", 0u);
     player.facingRight = json.value("facing_right", true);
-    player.hp = json.value("hp", kPlayerMaxHp);
-    player.shield = json.value("shield", kPlayerMaxShield);
+    player.hp = json.value("hp", DefaultEntityRegistry().StatsFor(kPlayerEntityId).maxHp);
+    player.shield = json.value("shield", DefaultEntityRegistry().StatsFor(kPlayerEntityId).maxShield);
     player.targetId = json.value("target_id", -1);
     player.moveTargetCol = json.value("move_target_col", -1);
     player.moveTargetRow = json.value("move_target_row", -1);
@@ -72,7 +75,7 @@ nlohmann::json EnemyStateToJson(const EnemyState& enemy) {
 EnemyState EnemyStateFromJson(const nlohmann::json& json) {
     EnemyState enemy;
     enemy.id = json.at("id").get<int>();
-    enemy.kind = json.value("kind", "goblin");
+    enemy.kind = json.value("kind", kGoblinEntityId);
     enemy.x = json.at("x").get<float>();
     enemy.y = json.at("y").get<float>();
     enemy.state = ParseEntityState(json.value("state", "idle"));
@@ -80,7 +83,7 @@ EnemyState EnemyStateFromJson(const nlohmann::json& json) {
     enemy.anim = ParsePlayerAnim(json.value("anim", "idle"));
     enemy.animStartTick = json.value("anim_start_tick", 0u);
     enemy.facingRight = json.value("facing_right", true);
-    enemy.hp = json.value("hp", kGoblinMaxHp);
+    enemy.hp = json.value("hp", DefaultEntityRegistry().StatsFor(enemy.kind).maxHp);
     enemy.targetId = json.value("target_id", -1);
     return enemy;
 }
