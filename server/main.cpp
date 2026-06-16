@@ -19,13 +19,23 @@ void HandleSignal(int) {
 }  // namespace
 
 int main() {
-    const uint16_t tcpPort = net::EnvPort("TCP_PORT", net::kDefaultTcpPort);
-    const uint16_t wsPort = net::EnvPort("WS_PORT", net::EnvPort("PORT", net::kDefaultWsPort));
+    const net::ServerPorts ports = net::ResolveServerPorts();
 
     std::cout << "=== Multiplayer Game Server ===\n";
     std::cout << "Authoritative host (headless)\n";
-    std::cout << "TCP port: " << tcpPort << " (desktop clients)\n";
-    std::cout << "WS  port: " << wsPort << " (web clients)\n";
+    std::cout << "TCP port: " << ports.tcp << " (from " << ports.tcpSource << ")\n";
+    std::cout << "WS  port: " << ports.ws << " (from " << ports.wsSource << ")\n";
+
+    if (ports.tcp == ports.ws) {
+        std::cerr << "\nError: TCP and WebSocket cannot use the same port ("
+                  << ports.tcp << ").\n";
+        std::cerr << "On Railway:\n";
+        std::cerr << "  - Keep TCP_PORT=7777 (or use RAILWAY_TCP_APPLICATION_PORT)\n";
+        std::cerr << "  - DELETE the WS_PORT variable entirely\n";
+        std::cerr << "  - Let Railway inject PORT automatically (your domain port, e.g. 8080)\n";
+        std::cerr << "  - Do not set PORT or WS_PORT to 7777\n";
+        return 1;
+    }
 
     net::GameServer server;
     gServer = &server;
@@ -35,7 +45,7 @@ int main() {
     std::signal(SIGPIPE, SIG_IGN);
 #endif
 
-    if (!server.Start(tcpPort, wsPort)) {
+    if (!server.Start(ports.tcp, ports.ws)) {
         std::cerr << "Failed to start server.\n";
         return 1;
     }

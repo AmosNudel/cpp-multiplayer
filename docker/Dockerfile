@@ -25,10 +25,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY --from=builder /app/build/game_server /app/game_server
 
-# Railway injects PORT; server reads PORT/WS_PORT and TCP_PORT.
+# Railway injects PORT (e.g. 8080). TCP proxy forwards to TCP_PORT.
 ENV TCP_PORT=7777
-ENV WS_PORT=7778
 
-EXPOSE 7777 7778
+EXPOSE 7777
 
 CMD ["/app/game_server"]

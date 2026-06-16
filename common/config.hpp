@@ -37,4 +37,59 @@ inline std::string EnvString(const char* name, const std::string& fallback) {
     return value;
 }
 
+inline bool HasEnv(const char* name) {
+    const char* value = std::getenv(name);
+    return value && value[0] != '\0';
+}
+
+inline bool TryEnvPort(const char* name, uint16_t& out) {
+    const char* value = std::getenv(name);
+    if (!value || value[0] == '\0') {
+        return false;
+    }
+    try {
+        const int parsed = std::stoi(value);
+        if (parsed <= 0 || parsed > 65535) {
+            return false;
+        }
+        out = static_cast<uint16_t>(parsed);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+struct ServerPorts {
+    uint16_t tcp = kDefaultTcpPort;
+    uint16_t ws = kDefaultWsPort;
+    std::string tcpSource = "default";
+    std::string wsSource = "default";
+};
+
+inline ServerPorts ResolveServerPorts() {
+    ServerPorts ports;
+
+    if (TryEnvPort("TCP_PORT", ports.tcp)) {
+        ports.tcpSource = "TCP_PORT";
+    } else if (TryEnvPort("RAILWAY_TCP_APPLICATION_PORT", ports.tcp)) {
+        ports.tcpSource = "RAILWAY_TCP_APPLICATION_PORT";
+    } else {
+        ports.tcp = kDefaultTcpPort;
+        ports.tcpSource = "default";
+    }
+
+    // Railway injects PORT at runtime for the public HTTP/WebSocket listener.
+    // Prefer PORT over WS_PORT — do not set WS_PORT=${{PORT}} in the dashboard.
+    if (TryEnvPort("PORT", ports.ws)) {
+        ports.wsSource = "PORT";
+    } else if (TryEnvPort("WS_PORT", ports.ws)) {
+        ports.wsSource = "WS_PORT";
+    } else {
+        ports.ws = kDefaultWsPort;
+        ports.wsSource = "default";
+    }
+
+    return ports;
+}
+
 }  // namespace net

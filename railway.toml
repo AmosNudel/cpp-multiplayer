@@ -6,14 +6,10 @@ dockerfilePath = "docker/Dockerfile"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
 
-# Railway exposes one public port by default. Set WS_PORT=$PORT in the
-# Railway service variables so web clients can reach the WebSocket listener.
-# Desktop TCP clients can use Railway's TCP proxy feature on TCP_PORT.
+# Railway exposes one public HTTP port via PORT (WebSocket).
+# Desktop TCP uses a separate TCP proxy -> TCP_PORT (7777).
+# Do NOT set PORT or WS_PORT to 7777.
 
 [[deploy.ports]]
 port = 7777
-protocol = "TCP"
-
-[[deploy.ports]]
-port = 7778
 protocol = "TCP"
