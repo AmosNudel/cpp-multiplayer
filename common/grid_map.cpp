@@ -1,5 +1,7 @@
 #include "common/grid_map.hpp"
 
+#include "common/enemies.hpp"
+
 namespace net {
 
 int GridMap::Index(int col, int row) {
@@ -28,6 +30,8 @@ GridMap GridMap::CreateDefault() {
     map.Set(12, 11, TileType::Prop);
     map.FillRect(2, 12, 5, 1, TileType::Prop);
     map.FillRect(15, 9, 2, 3, TileType::Prop);
+
+    map.Set(kDefaultGoblinCol, kDefaultGoblinRow, TileType::Enemy);
 
     return map;
 }

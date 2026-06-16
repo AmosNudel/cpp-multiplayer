@@ -10,7 +10,9 @@ namespace net {
 
 inline constexpr int kGoblinIdleFrameCount = 4;
 inline constexpr int kGoblinIdleAnimTicksPerFrame = 3;
-inline constexpr float kGoblinSpriteHeight = 96.0f;
+inline constexpr float kGoblinSpriteHeight = 128.0f;
+inline constexpr int kDefaultGoblinCol = 7;
+inline constexpr int kDefaultGoblinRow = 7;
 
 struct EnemyState {
     int id = 0;

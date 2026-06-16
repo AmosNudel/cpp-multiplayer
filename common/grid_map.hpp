@@ -11,6 +11,7 @@ enum class TileType : std::uint8_t {
     Empty = 0,
     Wall = 1,
     Prop = 2,
+    Enemy = 3,
 };
 
 class GridMap {

@@ -64,7 +64,8 @@ struct SpriteSheet {
         }
     }
 
-    void Draw(Vector2 center, Color tint, int frame, bool facingRight) const {
+    void Draw(Vector2 center, Color tint, int frame, bool facingRight,
+              float spriteHeight = kPlayerSpriteHeight) const {
         if (!loaded || frameCount <= 0) {
             return;
         }
@@ -78,7 +79,7 @@ struct SpriteSheet {
                                      : Rectangle{frameX + static_cast<float>(frameWidth), 0.0f,
                                                  -static_cast<float>(frameWidth),
                                                  static_cast<float>(frameHeight)};
-        const float scale = kPlayerSpriteHeight / static_cast<float>(frameHeight);
+        const float scale = spriteHeight / static_cast<float>(frameHeight);
         const float drawWidth = static_cast<float>(frameWidth) * scale;
         const float drawHeight = static_cast<float>(frameHeight) * scale;
         const Rectangle dest = {
@@ -152,7 +153,7 @@ struct GoblinSprites {
 
         const int frame =
             net::GoblinAnimFrameIndex(enemy.anim, serverTick, enemy.animStartTick);
-        idle.Draw(center, WHITE, frame, enemy.facingRight);
+        idle.Draw(center, WHITE, frame, enemy.facingRight, net::kGoblinSpriteHeight);
     }
 };
 
@@ -437,7 +438,7 @@ static void DrawGridTiles() {
     for (int row = 0; row < net::kGridRows; ++row) {
         for (int col = 0; col < net::kGridCols; ++col) {
             const net::TileType tile = map.Get(col, row);
-            if (tile == net::TileType::Empty) {
+            if (tile == net::TileType::Empty || tile == net::TileType::Enemy) {
                 continue;
             }
 
