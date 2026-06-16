@@ -82,6 +82,17 @@ void ClearEnemyChase(EnemyMovementState& move) {
     move.chaseTargetId = -1;
 }
 
+bool InPatrolIdle(const EnemyMovementState& move, uint32_t tick) {
+    return tick < move.patrolIdleUntilTick;
+}
+
+void BeginPatrolIdle(EnemyState& enemy, EnemyMovementState& move, uint32_t tick) {
+    SnapEntityToCellCenter(enemy.x, enemy.y);
+    move.patrolIdleUntilTick = tick + static_cast<uint32_t>(kGoblinPatrolIdleTicks);
+    TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
+                     EntityState::Idle, tick);
+}
+
 const std::vector<GridPoint>& GoblinPatrolWaypoints() {
     static const std::vector<GridPoint> waypoints = []() {
         const GridMap& map = DefaultGridMap();
@@ -353,6 +364,9 @@ bool IsComboAttackPhase(PlayerComboPhase phase) {
 
 void BeginCombat(PlayerState& player, EnemyState& enemy, ConnectedClient& client, uint32_t tick,
                  bool preserveCombo = false) {
+    SnapEntityToCellCenter(player.x, player.y);
+    SnapEntityToCellCenter(enemy.x, enemy.y);
+
     player.targetId = enemy.id;
     enemy.targetId = player.id;
     TransitionEntityState(player.state, player.stateStartTick, EntityState::Combat, tick);
@@ -373,6 +387,8 @@ void BeginCombat(PlayerState& player, EnemyState& enemy, ConnectedClient& client
 bool TryBeginGoblinCombat(EnemyState& enemy, PlayerState& player,
                           std::unordered_map<int, ConnectedClient>& clients,
                           std::vector<EnemyState>& enemies, uint32_t tick) {
+    SnapEntityToCellCenter(enemy.x, enemy.y);
+    SnapEntityToCellCenter(player.x, player.y);
     if (!IsInMeleeRange(enemy.x, enemy.y, player.x, player.y)) {
         return false;
     }
@@ -562,6 +578,9 @@ void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
         return;
     }
 
+    SnapEntityToCellCenter(player.x, player.y);
+    SnapEntityToCellCenter(enemy->x, enemy->y);
+
     UpdateFacingFromDirection(player, enemy->x - player.x, enemy->y - player.y);
     TryApplyComboSwingDamage(player, client, *enemy, tick);
 
@@ -619,6 +638,11 @@ void UpdateGoblinCombat(EnemyState& enemy, std::vector<PlayerState>& players, ui
 
     if (!IsInMeleeRange(enemy.x, enemy.y, player->x, player->y)) {
         return;
+    }
+
+    if (PlayerState* mutablePlayer = FindPlayer(players, enemy.targetId)) {
+        SnapEntityToCellCenter(enemy.x, enemy.y);
+        SnapEntityToCellCenter(mutablePlayer->x, mutablePlayer->y);
     }
 
     UpdateEnemyFacing(enemy, player->x - enemy.x, player->y - enemy.y);
@@ -683,12 +707,16 @@ void RespawnEnemy(int enemyId, std::vector<EnemyState>& enemies,
         spawned.stateStartTick = tick;
         spawned.animStartTick = tick;
         enemies.push_back(spawned);
+        enemyMovement[enemyId].patrolIdleUntilTick =
+            tick + static_cast<uint32_t>(kGoblinPatrolIdleTicks);
         return;
     }
 
     *enemy = CreateDefaultGoblin(enemyId);
     enemy->stateStartTick = tick;
     enemy->animStartTick = tick;
+    enemyMovement[enemyId].patrolIdleUntilTick =
+        tick + static_cast<uint32_t>(kGoblinPatrolIdleTicks);
 }
 
 void TryCompletePendingEngage(ConnectedClient& client, PlayerState& player,
@@ -863,23 +891,26 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
         return;
     }
 
-    if (PlayerState* aggroTarget = FindGoblinAggroTarget(enemy, players)) {
-        if (IsInMeleeRange(enemy.x, enemy.y, aggroTarget->x, aggroTarget->y)) {
-            ClearEnemyMove(move);
-            ClearEnemyChase(move);
-            TryBeginGoblinCombat(enemy, *aggroTarget, clients, enemies, tick);
-            return;
-        }
+    if (!InPatrolIdle(move, tick)) {
+        if (PlayerState* aggroTarget = FindGoblinAggroTarget(enemy, players)) {
+            if (IsInMeleeRange(enemy.x, enemy.y, aggroTarget->x, aggroTarget->y)) {
+                ClearEnemyMove(move);
+                ClearEnemyChase(move);
+                TryBeginGoblinCombat(enemy, *aggroTarget, clients, enemies, tick);
+                return;
+            }
 
-        if (!move.chasingPlayer || move.chaseTargetId != aggroTarget->id || !move.hasMoveTarget) {
-            StartGoblinChase(enemy, move, *aggroTarget, clients, enemies, map, tick);
-        }
-    } else if (move.chasingPlayer) {
-        ClearEnemyChase(move);
-        ClearEnemyMove(move);
-        if (enemy.state == EntityState::Moving) {
-            TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
-                             EntityState::Idle, tick);
+            if (!move.chasingPlayer || move.chaseTargetId != aggroTarget->id ||
+                !move.hasMoveTarget) {
+                StartGoblinChase(enemy, move, *aggroTarget, clients, enemies, map, tick);
+            }
+        } else if (move.chasingPlayer) {
+            ClearEnemyChase(move);
+            ClearEnemyMove(move);
+            if (enemy.state == EntityState::Moving) {
+                TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim,
+                                 enemy.animStartTick, EntityState::Idle, tick);
+            }
         }
     }
 
@@ -889,6 +920,7 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
             if (move.chasingPlayer && move.chaseTargetId >= 0) {
                 PlayerState* chaseTarget = FindPlayer(players, move.chaseTargetId);
                 if (chaseTarget != nullptr) {
+                    SnapEntityToCellCenter(enemy.x, enemy.y);
                     TryCompleteGoblinChase(enemy, move, *chaseTarget, clients, enemies, map, tick);
                 } else {
                     ClearEnemyChase(move);
@@ -896,14 +928,14 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
                                      enemy.animStartTick, EntityState::Idle, tick);
                 }
             } else if (enemy.state == EntityState::Moving) {
-                TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
-                                 EntityState::Idle, tick);
+                BeginPatrolIdle(enemy, move, tick);
             }
         }
         return;
     }
 
-    if (enemy.state == EntityState::Idle) {
+    if (enemy.state == EntityState::Idle && !move.chasingPlayer && !move.hasMoveTarget &&
+        !InPatrolIdle(move, tick)) {
         StartNextPatrolLeg(enemy, move, map, tick);
     }
 }
@@ -974,6 +1006,8 @@ bool GameServer::Start(uint16_t tcpPort, uint16_t wsPort) {
     for (EnemyState& enemy : enemies_) {
         enemy.stateStartTick = tick_;
         enemy.animStartTick = tick_;
+        enemyMovement_[enemy.id].patrolIdleUntilTick =
+            tick_ + static_cast<uint32_t>(kGoblinPatrolIdleTicks);
     }
     return true;
 }

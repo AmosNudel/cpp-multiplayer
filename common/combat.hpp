@@ -15,6 +15,8 @@ namespace net {
 int ManhattanCellDistance(int colA, int rowA, int colB, int rowB);
 bool IsInMeleeRange(float ax, float ay, float bx, float by);
 
+void SnapEntityToCellCenter(float& x, float& y);
+
 std::optional<GridPoint> FindBestAdjacentApproachTile(const GridMap& map, int startCol,
                                                       int startRow, int targetCol,
                                                       int targetRow);

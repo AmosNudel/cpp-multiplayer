@@ -19,6 +19,11 @@ bool IsInMeleeRange(float ax, float ay, float bx, float by) {
     return ManhattanCellDistance(colA, rowA, colB, rowB) == 1;
 }
 
+void SnapEntityToCellCenter(float& x, float& y) {
+    x = CellCenterX(WorldToCellCol(x));
+    y = CellCenterY(WorldToCellRow(y));
+}
+
 std::optional<GridPoint> FindBestAdjacentApproachTile(const GridMap& map, int startCol,
                                                       int startRow, int targetCol,
                                                       int targetRow) {

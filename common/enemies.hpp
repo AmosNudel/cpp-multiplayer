@@ -23,6 +23,7 @@ inline constexpr int kGoblinPatrolMaxCol = 9;
 inline constexpr int kGoblinPatrolMinRow = 5;
 inline constexpr int kGoblinPatrolMaxRow = 9;
 inline constexpr int kGoblinAggroCellDistance = 1;
+inline constexpr int kGoblinPatrolIdleTicks = 60;
 
 struct EnemyState {
     int id = 0;

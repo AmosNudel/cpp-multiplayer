@@ -35,6 +35,7 @@ struct EnemyMovementState {
     size_t patrolWaypointIndex = 0;
     bool chasingPlayer = false;
     int chaseTargetId = -1;
+    uint32_t patrolIdleUntilTick = 0;
 };
 
 struct ConnectedClient {
