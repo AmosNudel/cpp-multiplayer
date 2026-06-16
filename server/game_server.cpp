@@ -256,7 +256,7 @@ void GameServer::SimulateTick() {
             dy /= length;
         }
 
-        const PlayerAnim desiredAnim = PlayerAnim::Idle;
+        const PlayerAnim desiredAnim = length > 0.0f ? PlayerAnim::Run : PlayerAnim::Idle;
         if (player.anim != desiredAnim) {
             player.anim = desiredAnim;
             player.animStartTick = tick_;

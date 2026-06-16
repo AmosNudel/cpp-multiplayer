@@ -22,22 +22,26 @@ inline constexpr float kPlayerSpeed = 200.0f;
 inline constexpr float kPlayerRadius = 16.0f;
 inline constexpr int kIdleFrameCount = 7;
 inline constexpr int kIdleAnimTicksPerFrame = 2;
+inline constexpr int kRunFrameCount = 8;
+inline constexpr int kRunAnimTicksPerFrame = 1;
 inline constexpr int kMaxChatLength = 120;
 
 enum class PlayerAnim {
     Idle,
+    Run,
 };
 
 inline const char* PlayerAnimName(PlayerAnim anim) {
     switch (anim) {
         case PlayerAnim::Idle: return "idle";
+        case PlayerAnim::Run: return "run";
     }
     return "idle";
 }
 
 inline PlayerAnim ParsePlayerAnim(const std::string& value) {
-    if (value == "idle") {
-        return PlayerAnim::Idle;
+    if (value == "run") {
+        return PlayerAnim::Run;
     }
     return PlayerAnim::Idle;
 }
@@ -45,6 +49,7 @@ inline PlayerAnim ParsePlayerAnim(const std::string& value) {
 inline int AnimFrameCount(PlayerAnim anim) {
     switch (anim) {
         case PlayerAnim::Idle: return kIdleFrameCount;
+        case PlayerAnim::Run: return kRunFrameCount;
     }
     return kIdleFrameCount;
 }
@@ -52,6 +57,7 @@ inline int AnimFrameCount(PlayerAnim anim) {
 inline int AnimTicksPerFrame(PlayerAnim anim) {
     switch (anim) {
         case PlayerAnim::Idle: return kIdleAnimTicksPerFrame;
+        case PlayerAnim::Run: return kRunAnimTicksPerFrame;
     }
     return kIdleAnimTicksPerFrame;
 }

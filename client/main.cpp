@@ -16,63 +16,9 @@ static const int screenHeight = 640;
 
 static const char* kIdleSpritePath =
     "assets/player_sprites/Sprites/with_outline/IDLE.png";
+static const char* kRunSpritePath =
+    "assets/player_sprites/Sprites/with_outline/RUN.png";
 static const float kPlayerSpriteHeight = 96.0f;
-
-struct PlayerIdleSprite {
-    Texture2D texture{};
-    int frameWidth = 0;
-    int frameHeight = 0;
-    bool loaded = false;
-
-    void Load(const char* path) {
-        texture = LoadTexture(path);
-        if (texture.id == 0) {
-            TraceLog(LOG_WARNING, "Failed to load player sprite: %s", path);
-            return;
-        }
-        frameWidth = texture.width / net::kIdleFrameCount;
-        frameHeight = texture.height;
-        loaded = true;
-    }
-
-    void Unload() {
-        if (loaded) {
-            UnloadTexture(texture);
-            loaded = false;
-        }
-    }
-
-    void Draw(Vector2 center, Color tint, int frame, bool facingRight) const {
-        if (!loaded) {
-            DrawCircleV(center, net::kPlayerRadius, tint);
-            return;
-        }
-
-        frame = frame % net::kIdleFrameCount;
-        const Rectangle source = {
-            static_cast<float>(frame * frameWidth), 0.0f,
-            static_cast<float>(frameWidth), static_cast<float>(frameHeight),
-        };
-        const float scale = kPlayerSpriteHeight / static_cast<float>(frameHeight);
-        const float drawWidth = static_cast<float>(frameWidth) * scale;
-        const float drawHeight = static_cast<float>(frameHeight) * scale;
-        const Rectangle dest = facingRight
-                                   ? Rectangle{
-                                         center.x - drawWidth * 0.5f,
-                                         center.y - drawHeight * 0.5f,
-                                         drawWidth,
-                                         drawHeight,
-                                     }
-                                   : Rectangle{
-                                         center.x + drawWidth * 0.5f,
-                                         center.y - drawHeight * 0.5f,
-                                         -drawWidth,
-                                         drawHeight,
-                                     };
-
-        DrawTexturePro(texture, source, dest, Vector2{0.0f, 0.0f}, 0.0f, tint);
-    }
-};
 
 static std::string ResolveAssetPath(const char* relativePath) {
     const std::string relative = relativePath;
@@ -85,8 +31,103 @@ static std::string ResolveAssetPath(const char* relativePath) {
     return relative;
 }
 
+struct SpriteSheet {
+    Texture2D texture{};
+    int frameWidth = 0;
+    int frameHeight = 0;
+    int frameCount = 0;
+    bool loaded = false;
+
+    void Load(const char* path, int frames) {
+        texture = LoadTexture(path);
+        if (texture.id == 0) {
+            TraceLog(LOG_WARNING, "Failed to load sprite sheet: %s", path);
+            return;
+        }
+        frameCount = frames;
+        frameWidth = texture.width / frameCount;
+        frameHeight = texture.height;
+        loaded = true;
+    }
+
+    void Unload() {
+        if (loaded) {
+            UnloadTexture(texture);
+            loaded = false;
+        }
+    }
+
+    void Draw(Vector2 center, Color tint, int frame, bool facingRight) const {
+        if (!loaded || frameCount <= 0) {
+            return;
+        }
+
+        frame = frame % frameCount;
+        const float frameX = static_cast<float>(frame * frameWidth);
+        const Rectangle source = facingRight
+                                     ? Rectangle{frameX, 0.0f,
+                                                 static_cast<float>(frameWidth),
+                                                 static_cast<float>(frameHeight)}
+                                     : Rectangle{frameX + static_cast<float>(frameWidth), 0.0f,
+                                                 -static_cast<float>(frameWidth),
+                                                 static_cast<float>(frameHeight)};
+        const float scale = kPlayerSpriteHeight / static_cast<float>(frameHeight);
+        const float drawWidth = static_cast<float>(frameWidth) * scale;
+        const float drawHeight = static_cast<float>(frameHeight) * scale;
+        const Rectangle dest = {
+            center.x - drawWidth * 0.5f,
+            center.y - drawHeight * 0.5f,
+            drawWidth,
+            drawHeight,
+        };
+
+        DrawTexturePro(texture, source, dest, Vector2{0.0f, 0.0f}, 0.0f, tint);
+    }
+};
+
+struct PlayerSprites {
+    SpriteSheet idle;
+    SpriteSheet run;
+
+    void Load() {
+        idle.Load(ResolveAssetPath(kIdleSpritePath).c_str(), net::kIdleFrameCount);
+        run.Load(ResolveAssetPath(kRunSpritePath).c_str(), net::kRunFrameCount);
+    }
+
+    void Unload() {
+        idle.Unload();
+        run.Unload();
+    }
+
+    bool AnyLoaded() const { return idle.loaded || run.loaded; }
+
+    void Draw(const net::PlayerState& player, uint32_t serverTick, Vector2 center,
+              Color tint) const {
+        const int frame =
+            net::AnimFrameIndex(player.anim, serverTick, player.animStartTick);
+
+        switch (player.anim) {
+            case net::PlayerAnim::Run:
+                if (run.loaded) {
+                    run.Draw(center, tint, frame, player.facingRight);
+                    return;
+                }
+                break;
+            case net::PlayerAnim::Idle:
+            default:
+                if (idle.loaded) {
+                    idle.Draw(center, tint, frame, player.facingRight);
+                    return;
+                }
+                break;
+        }
+
+        DrawCircleV(center, net::kPlayerRadius, tint);
+    }
+};
+
 static net::GameClient gClient;
-static PlayerIdleSprite gPlayerIdleSprite;
+static PlayerSprites gPlayerSprites;
 static std::string gStatusText = "Press ENTER to connect";
 static std::string gPlayerName = "Player";
 static std::string gChatInput;
@@ -255,7 +296,7 @@ static void DrawGame() {
     DrawRectangleLines(80, 80, static_cast<int>(net::kWorldWidth),
                        static_cast<int>(net::kWorldHeight), Color{70, 76, 92, 255});
 
-    const float nameOffsetY = gPlayerIdleSprite.loaded
+    const float nameOffsetY = gPlayerSprites.AnyLoaded()
                                   ? kPlayerSpriteHeight * 0.5f + 8.0f
                                   : net::kPlayerRadius + 22.0f;
 
@@ -267,9 +308,7 @@ static void DrawGame() {
             80.0f + player.y,
         };
 
-        const int frame = net::AnimFrameIndex(player.anim, gClient.GetServerTick(),
-                                              player.animStartTick);
-        gPlayerIdleSprite.Draw(center, color, frame, player.facingRight);
+        gPlayerSprites.Draw(player, gClient.GetServerTick(), center, color);
         DrawText(player.name.c_str(),
                  static_cast<int>(center.x - 24.0f),
                  static_cast<int>(center.y - nameOffsetY),
@@ -303,9 +342,9 @@ static void MainLoop() {
 int main() {
     InitWindow(screenWidth, screenHeight, "Multiplayer Game");
     SetTargetFPS(60);
-    gPlayerIdleSprite.Load(ResolveAssetPath(kIdleSpritePath).c_str());
+    gPlayerSprites.Load();
     emscripten_set_main_loop(MainLoop, 0, 1);
-    gPlayerIdleSprite.Unload();
+    gPlayerSprites.Unload();
     CloseWindow();
     return 0;
 }
@@ -313,7 +352,7 @@ int main() {
 int main() {
     InitWindow(screenWidth, screenHeight, "Multiplayer Game");
     SetTargetFPS(60);
-    gPlayerIdleSprite.Load(ResolveAssetPath(kIdleSpritePath).c_str());
+    gPlayerSprites.Load();
 
     while (!WindowShouldClose()) {
         UpdateGame();
@@ -321,7 +360,7 @@ int main() {
     }
 
     gClient.Disconnect();
-    gPlayerIdleSprite.Unload();
+    gPlayerSprites.Unload();
     CloseWindow();
     return 0;
 }
