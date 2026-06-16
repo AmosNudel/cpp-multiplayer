@@ -34,4 +34,6 @@ void RestartEntityAnim(PlayerAnim& anim, uint32_t& animStartTick, PlayerAnim new
 int CurrentAnimFrame(PlayerAnim anim, uint32_t tick, uint32_t animStartTick);
 bool IsAnimFinished(PlayerAnim anim, uint32_t tick, uint32_t animStartTick);
 
+bool ApplyDamageToPlayer(PlayerState& player, int damage, uint32_t tick);
+
 }  // namespace net

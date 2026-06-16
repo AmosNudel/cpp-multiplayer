@@ -19,6 +19,7 @@ nlohmann::json PlayerStateToJson(const PlayerState& player) {
         {"anim_start_tick", player.animStartTick},
         {"facing_right", player.facingRight},
         {"hp", player.hp},
+        {"shield", player.shield},
     };
     if (player.targetId >= 0) {
         json["target_id"] = player.targetId;
@@ -42,6 +43,7 @@ PlayerState PlayerStateFromJson(const nlohmann::json& json) {
     player.animStartTick = json.value("anim_start_tick", 0u);
     player.facingRight = json.value("facing_right", true);
     player.hp = json.value("hp", kPlayerMaxHp);
+    player.shield = json.value("shield", kPlayerMaxShield);
     player.targetId = json.value("target_id", -1);
     player.moveTargetCol = json.value("move_target_col", -1);
     player.moveTargetRow = json.value("move_target_row", -1);

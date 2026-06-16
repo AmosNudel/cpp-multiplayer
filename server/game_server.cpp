@@ -184,14 +184,69 @@ bool IsComboAttackPhase(PlayerComboPhase phase) {
            phase == PlayerComboPhase::Attack3;
 }
 
-void BeginCombat(PlayerState& player, EnemyState& enemy, ConnectedClient& client, uint32_t tick) {
+void BeginCombat(PlayerState& player, EnemyState& enemy, ConnectedClient& client, uint32_t tick,
+                 bool preserveCombo = false) {
     player.targetId = enemy.id;
     enemy.targetId = player.id;
     TransitionEntityState(player.state, player.stateStartTick, EntityState::Combat, tick);
     TransitionEntityState(enemy.state, enemy.stateStartTick, EntityState::Combat, tick);
     UpdateFacingFromDirection(player, enemy.x - player.x, enemy.y - player.y);
     UpdateEnemyFacing(enemy, player.x - enemy.x, player.y - enemy.y);
-    StartPlayerComboPhase(player, client, PlayerComboPhase::Attack1, PlayerAnim::Attack1, tick);
+
+    if (preserveCombo && client.comboPhase != PlayerComboPhase::None) {
+        client.comboPhaseStartTick = tick;
+        client.comboSwingDamageDealt = false;
+        RestartEntityAnim(player.anim, player.animStartTick,
+                          AnimForComboPhase(client.comboPhase), tick);
+    } else {
+        StartPlayerComboPhase(player, client, PlayerComboPhase::Attack1, PlayerAnim::Attack1, tick);
+    }
+}
+
+bool TryPathToCombatTarget(PlayerState& player, ConnectedClient& client, const EnemyState& enemy,
+                           const GridMap& map, uint32_t tick) {
+    const int playerCol = WorldToCellCol(player.x);
+    const int playerRow = WorldToCellRow(player.y);
+    const int enemyCol = WorldToCellCol(enemy.x);
+    const int enemyRow = WorldToCellRow(enemy.y);
+    const std::optional<GridPoint> approach =
+        FindBestAdjacentApproachTile(map, playerCol, playerRow, enemyCol, enemyRow);
+    if (!approach.has_value()) {
+        return false;
+    }
+
+    client.pendingAttackEnemyId = enemy.id;
+    return StartPlayerPath(client, player, map, approach->first, approach->second, tick);
+}
+
+void RecoverPlayerAfterHit(PlayerState& player, ConnectedClient& client,
+                           std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
+    if (player.targetId < 0) {
+        TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                         EntityState::Idle, tick);
+        return;
+    }
+
+    EnemyState* enemy = FindEnemy(enemies, player.targetId);
+    if (enemy == nullptr || !IsAlive(enemy->state)) {
+        EndPlayerCombat(player, enemies, tick);
+        TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                         EntityState::Idle, tick);
+        return;
+    }
+
+    if (IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
+        BeginCombat(player, *enemy, client, tick, true);
+        return;
+    }
+
+    if (TryPathToCombatTarget(player, client, *enemy, map, tick)) {
+        return;
+    }
+
+    EndPlayerCombat(player, enemies, tick);
+    TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                     EntityState::Idle, tick);
 }
 
 void CancelPlayerCombat(PlayerState& player, ConnectedClient& client,
@@ -216,23 +271,6 @@ void ApplyDamageToEnemy(EnemyState& enemy, int damage, uint32_t tick) {
     }
 
     TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
-                     EntityState::Hit, tick);
-}
-
-void ApplyDamageToPlayer(PlayerState& player, int damage, uint32_t tick) {
-    if (!IsAlive(player.state)) {
-        return;
-    }
-
-    player.hp -= damage;
-    if (player.hp <= 0) {
-        player.hp = 0;
-        TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
-                         EntityState::Dead, tick);
-        return;
-    }
-
-    TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
                      EntityState::Hit, tick);
 }
 
@@ -265,13 +303,19 @@ void TryApplyComboSwingDamage(PlayerState& player, ConnectedClient& client, Enem
 }
 
 void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
-                       std::vector<EnemyState>& enemies, uint32_t tick) {
+                       std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
     ClearPlayerMove(client, player);
 
     EnemyState* enemy = FindEnemy(enemies, player.targetId);
-    if (enemy == nullptr || !IsAlive(enemy->state) ||
-        !IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
+    if (enemy == nullptr || !IsAlive(enemy->state)) {
         CancelPlayerCombat(player, client, enemies, tick);
+        return;
+    }
+
+    if (!IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
+        if (!TryPathToCombatTarget(player, client, *enemy, map, tick)) {
+            CancelPlayerCombat(player, client, enemies, tick);
+        }
         return;
     }
 
@@ -330,10 +374,6 @@ bool TryPerformEnemyAttack(EnemyState& enemy, std::vector<PlayerState>& players,
         return false;
     }
 
-    if (player->state == EntityState::Combat) {
-        return false;
-    }
-
     if (!IsInMeleeRange(enemy.x, enemy.y, player->x, player->y)) {
         return false;
     }
@@ -370,12 +410,17 @@ void TryCompletePendingEngage(ConnectedClient& client, PlayerState& player,
     }
 
     if (!IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
+        client.pendingAttackEnemyId = enemyId;
+        if (TryPathToCombatTarget(player, client, *enemy, DefaultGridMap(), tick)) {
+            return;
+        }
+        EndPlayerCombat(player, enemies, tick);
         TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
                          EntityState::Idle, tick);
         return;
     }
 
-    BeginCombat(player, *enemy, client, tick);
+    BeginCombat(player, *enemy, client, tick, client.comboPhase != PlayerComboPhase::None);
 }
 
 bool StepPlayerMovement(PlayerState& player, ConnectedClient& client, uint32_t tick) {
@@ -443,22 +488,8 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
             if (player.hp <= 0) {
                 TransitionEntity(player.state, player.stateStartTick, player.anim,
                                  player.animStartTick, EntityState::Dead, tick);
-            } else if (player.targetId >= 0) {
-                EnemyState* enemy = FindEnemy(enemies, player.targetId);
-                if (enemy != nullptr && IsAlive(enemy->state) &&
-                    IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
-                    TransitionEntityState(player.state, player.stateStartTick, EntityState::Combat,
-                                          tick);
-                    StartPlayerComboPhase(player, client, PlayerComboPhase::Attack1,
-                                          PlayerAnim::Attack1, tick);
-                } else {
-                    EndPlayerCombat(player, enemies, tick);
-                    TransitionEntity(player.state, player.stateStartTick, player.anim,
-                                     player.animStartTick, EntityState::Idle, tick);
-                }
             } else {
-                TransitionEntity(player.state, player.stateStartTick, player.anim,
-                                 player.animStartTick, EntityState::Idle, tick);
+                RecoverPlayerAfterHit(player, client, enemies, DefaultGridMap(), tick);
             }
         }
         return;
@@ -476,7 +507,7 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
     }
 
     if (player.state == EntityState::Combat) {
-        UpdatePlayerCombo(player, client, enemies, tick);
+        UpdatePlayerCombo(player, client, enemies, DefaultGridMap(), tick);
     }
 }
 
@@ -714,6 +745,7 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
                             static_cast<uint32_t>(kIdleAnimTicksPerFrame);
             player.animStartTick = player.stateStartTick;
             player.hp = kPlayerMaxHp;
+            player.shield = kPlayerMaxShield;
             player.moveTargetCol = -1;
             player.moveTargetRow = -1;
             players_.push_back(player);

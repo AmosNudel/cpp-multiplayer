@@ -794,12 +794,33 @@ static void DrawEntityHpBar(Vector2 worldCenter, int hp, int maxHp, float sprite
     DrawRectangle(x, y, barWidth * fillRatio, barHeight, Color{220, 60, 60, 255});
 }
 
+static void DrawEntityShieldBar(Vector2 worldCenter, int shield, int maxShield, float spriteHeight) {
+    if (maxShield <= 0 || shield <= 0) {
+        return;
+    }
+
+    const float barWidth = 36.0f;
+    const float barHeight = 4.0f;
+    const float y = worldCenter.y - spriteHeight * 0.5f - 16.0f;
+    const float x = worldCenter.x - barWidth * 0.5f;
+    const float fillRatio = static_cast<float>(shield) / static_cast<float>(maxShield);
+
+    DrawRectangle(x, y, barWidth, barHeight, Color{40, 40, 40, 200});
+    DrawRectangle(x, y, barWidth * fillRatio, barHeight, Color{80, 160, 255, 255});
+}
+
+static void DrawPlayerBars(const net::PlayerState& player, Vector2 center) {
+    if (player.state == net::EntityState::Dead) {
+        return;
+    }
+    DrawEntityShieldBar(center, player.shield, net::kPlayerMaxShield, kPlayerSpriteHeight);
+    DrawEntityHpBar(center, player.hp, net::kPlayerMaxHp, kPlayerSpriteHeight);
+}
+
 static void DrawPlayerSprite(const net::PlayerState& player, Color color) {
     const Vector2 center = {player.x, player.y};
     gPlayerSprites.Draw(player, gClient.GetServerTick(), center, color);
-    if (player.state != net::EntityState::Dead) {
-        DrawEntityHpBar(center, player.hp, net::kPlayerMaxHp, kPlayerSpriteHeight);
-    }
+    DrawPlayerBars(player, center);
 }
 
 static void DrawPlayerName(const net::PlayerState& player, float nameOffsetY) {

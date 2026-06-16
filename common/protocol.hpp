@@ -50,6 +50,7 @@ struct PlayerState {
     uint32_t animStartTick = 0;
     bool facingRight = true;
     int hp = kPlayerMaxHp;
+    int shield = kPlayerMaxShield;
     int targetId = -1;
     int moveTargetCol = -1;
     int moveTargetRow = -1;

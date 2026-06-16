@@ -123,4 +123,32 @@ bool IsAnimFinished(PlayerAnim anim, uint32_t tick, uint32_t animStartTick) {
     return elapsed >= static_cast<uint32_t>(frameCount * ticksPerFrame);
 }
 
+bool ApplyDamageToPlayer(PlayerState& player, int damage, uint32_t tick) {
+    if (!IsAlive(player.state) || damage <= 0) {
+        return false;
+    }
+
+    if (player.shield > 0) {
+        const int shieldDamage = damage < player.shield ? damage : player.shield;
+        player.shield -= shieldDamage;
+        damage -= shieldDamage;
+    }
+
+    if (damage <= 0) {
+        return false;
+    }
+
+    player.hp -= damage;
+    if (player.hp <= 0) {
+        player.hp = 0;
+        TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                         EntityState::Dead, tick);
+        return true;
+    }
+
+    TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                     EntityState::Hit, tick);
+    return true;
+}
+
 }  // namespace net
