@@ -27,6 +27,8 @@ struct ConnectedClient {
     bool hasMoveTarget = false;
     int targetCol = 0;
     int targetRow = 0;
+    std::vector<std::pair<int, int>> movePath;
+    size_t pathIndex = 0;
 };
 
 class GameServer {

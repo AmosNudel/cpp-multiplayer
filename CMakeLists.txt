@@ -28,6 +28,8 @@ FetchContent_MakeAvailable(ixwebsocket)
 add_library(net_common STATIC
     common/protocol.cpp
     common/socket_utils.cpp
+    common/grid_map.cpp
+    common/pathfinding.cpp
 )
 target_include_directories(net_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(net_common PUBLIC nlohmann_json::nlohmann_json)

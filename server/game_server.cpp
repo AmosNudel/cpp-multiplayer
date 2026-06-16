@@ -8,6 +8,8 @@
 
 #include "common/config.hpp"
 #include "common/grid.hpp"
+#include "common/grid_map.hpp"
+#include "common/pathfinding.hpp"
 
 namespace net {
 namespace {
@@ -155,11 +157,28 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             clients_[incoming.clientId] = client;
             transportByClientId_[incoming.clientId] = incoming.transport;
 
+            const GridMap& map = DefaultGridMap();
+            int spawnCol = kGridCols / 2;
+            int spawnRow = kGridRows / 2;
+            if (!map.IsWalkable(spawnCol, spawnRow)) {
+                bool foundSpawn = false;
+                for (int row = 1; row < kGridRows - 1 && !foundSpawn; ++row) {
+                    for (int col = 1; col < kGridCols - 1; ++col) {
+                        if (map.IsWalkable(col, row)) {
+                            spawnCol = col;
+                            spawnRow = row;
+                            foundSpawn = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
             PlayerState player;
             player.id = incoming.clientId;
             player.name = client.name;
-            player.x = CellCenterX(kGridCols / 2);
-            player.y = CellCenterY(kGridRows / 2);
+            player.x = CellCenterX(spawnCol);
+            player.y = CellCenterY(spawnRow);
             player.anim = PlayerAnim::Idle;
             player.animStartTick =
                 tick_ + static_cast<uint32_t>(incoming.clientId % kIdleFrameCount) *
@@ -186,21 +205,50 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
 
             const int col = incoming.message.moveRequest.col;
             const int row = incoming.message.moveRequest.row;
-            if (!IsValidCell(col, row)) {
+            const GridMap& map = DefaultGridMap();
+            if (!IsValidCell(col, row) || !map.IsWalkable(col, row)) {
                 return;
             }
 
-            it->second.hasMoveTarget = true;
-            it->second.targetCol = col;
-            it->second.targetRow = row;
-
-            for (PlayerState& player : players_) {
-                if (player.id == incoming.clientId) {
-                    player.moveTargetCol = col;
-                    player.moveTargetRow = row;
+            PlayerState* player = nullptr;
+            for (PlayerState& candidate : players_) {
+                if (candidate.id == incoming.clientId) {
+                    player = &candidate;
                     break;
                 }
             }
+            if (player == nullptr) {
+                return;
+            }
+
+            const int startCol = WorldToCellCol(player->x);
+            const int startRow = WorldToCellRow(player->y);
+            std::vector<GridPoint> path =
+                FindPath(map, startCol, startRow, col, row);
+            if (path.empty()) {
+                return;
+            }
+
+            ConnectedClient& client = it->second;
+            client.movePath = std::move(path);
+            client.pathIndex = 0;
+            if (client.movePath.size() > 1 && client.movePath[0].first == startCol &&
+                client.movePath[0].second == startRow) {
+                client.pathIndex = 1;
+            }
+            if (client.pathIndex >= client.movePath.size()) {
+                client.hasMoveTarget = false;
+                client.movePath.clear();
+                player->moveTargetCol = -1;
+                player->moveTargetRow = -1;
+                return;
+            }
+
+            client.hasMoveTarget = true;
+            client.targetCol = col;
+            client.targetRow = row;
+            player->moveTargetCol = col;
+            player->moveTargetRow = row;
             break;
         }
         case MessageType::Ping: {
@@ -259,9 +307,10 @@ void GameServer::SimulateTick() {
         ConnectedClient& client = clientIt->second;
         bool moving = false;
 
-        if (client.hasMoveTarget) {
-            const float targetX = CellCenterX(client.targetCol);
-            const float targetY = CellCenterY(client.targetRow);
+        if (client.hasMoveTarget && client.pathIndex < client.movePath.size()) {
+            const auto& waypoint = client.movePath[client.pathIndex];
+            const float targetX = CellCenterX(waypoint.first);
+            const float targetY = CellCenterY(waypoint.second);
             float dx = targetX - player.x;
             float dy = targetY - player.y;
             const float dist = std::sqrt(dx * dx + dy * dy);
@@ -271,9 +320,13 @@ void GameServer::SimulateTick() {
             if (dist <= arriveDist) {
                 player.x = targetX;
                 player.y = targetY;
-                client.hasMoveTarget = false;
-                player.moveTargetCol = -1;
-                player.moveTargetRow = -1;
+                ++client.pathIndex;
+                if (client.pathIndex >= client.movePath.size()) {
+                    client.hasMoveTarget = false;
+                    client.movePath.clear();
+                    player.moveTargetCol = -1;
+                    player.moveTargetRow = -1;
+                }
             } else {
                 dx /= dist;
                 dy /= dist;

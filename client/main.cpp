@@ -8,6 +8,7 @@
 #include "client/viewport.hpp"
 #include "common/config.hpp"
 #include "common/grid.hpp"
+#include "common/grid_map.hpp"
 
 #if defined(PLATFORM_WEB)
 #include <emscripten.h>
@@ -340,6 +341,9 @@ static void HandleMapClick() {
     if (!TryGetWorldCellFromVirtual(virtualPos, col, row)) {
         return;
     }
+    if (!net::DefaultGridMap().IsWalkable(col, row)) {
+        return;
+    }
 
     gClient.SendMoveRequest(col, row);
 }
@@ -399,6 +403,24 @@ static void HandleOptionsInput() {
 }
 #endif
 
+static void DrawGridTiles() {
+    const net::GridMap& map = net::DefaultGridMap();
+    const Color wallColor = Color{90, 94, 104, 255};
+    const Color propColor = Color{220, 130, 45, 255};
+
+    for (int row = 0; row < net::kGridRows; ++row) {
+        for (int col = 0; col < net::kGridCols; ++col) {
+            const net::TileType tile = map.Get(col, row);
+            if (tile == net::TileType::Empty) {
+                continue;
+            }
+
+            const Color color = tile == net::TileType::Wall ? wallColor : propColor;
+            DrawRectangleRec(CellScreenRect(col, row), color);
+        }
+    }
+}
+
 static void DrawGrid() {
     const int originX = static_cast<int>(kWorldScreenOriginX);
     const int originY = static_cast<int>(kWorldScreenOriginY);
@@ -437,7 +459,11 @@ static void DrawGridHighlights() {
     int hoverRow = 0;
     if (!IsMouseOverChatPanel(virtualPos) &&
         TryGetWorldCellFromVirtual(virtualPos, hoverCol, hoverRow)) {
-        DrawRectangleRec(CellScreenRect(hoverCol, hoverRow), Color{90, 100, 130, 60});
+        const net::GridMap& map = net::DefaultGridMap();
+        const Color hoverColor = map.IsWalkable(hoverCol, hoverRow)
+                                     ? Color{90, 100, 130, 60}
+                                     : Color{180, 80, 80, 50};
+        DrawRectangleRec(CellScreenRect(hoverCol, hoverRow), hoverColor);
     }
 
     for (const net::PlayerState& player : gClient.GetPlayers()) {
@@ -622,6 +648,7 @@ static void DrawGame() {
                   static_cast<int>(kWorldScreenOriginY),
                   static_cast<int>(net::kWorldWidth), static_cast<int>(net::kWorldHeight),
                   Color{36, 40, 50, 255});
+    DrawGridTiles();
     DrawGrid();
     DrawRectangleLines(static_cast<int>(kWorldScreenOriginX),
                        static_cast<int>(kWorldScreenOriginY),
