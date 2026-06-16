@@ -23,6 +23,12 @@ static const char* kIdleSpritePath =
     "assets/player_sprites/Sprites/with_outline/IDLE.png";
 static const char* kRunSpritePath =
     "assets/player_sprites/Sprites/with_outline/RUN.png";
+static const char* kAttack1SpritePath =
+    "assets/player_sprites/Sprites/without_outline/ATTACK 1.png";
+static const char* kAttack2SpritePath =
+    "assets/player_sprites/Sprites/without_outline/ATTACK 2.png";
+static const char* kAttack3SpritePath =
+    "assets/player_sprites/Sprites/without_outline/ATTACK 3.png";
 static const char* kGoblinIdleSpritePath = "assets/enemy/Goblin/Idle.png";
 static const char* kGoblinRunSpritePath = "assets/enemy/Goblin/Run.png";
 static const float kPlayerSpriteHeight = 96.0f;
@@ -97,18 +103,42 @@ struct SpriteSheet {
 struct PlayerSprites {
     SpriteSheet idle;
     SpriteSheet run;
+    SpriteSheet attack1;
+    SpriteSheet attack2;
+    SpriteSheet attack3;
 
     void Load() {
         idle.Load(ResolveAssetPath(kIdleSpritePath).c_str(), net::kIdleFrameCount);
         run.Load(ResolveAssetPath(kRunSpritePath).c_str(), net::kRunFrameCount);
+        attack1.Load(ResolveAssetPath(kAttack1SpritePath).c_str(), net::kAttack1FrameCount);
+        attack2.Load(ResolveAssetPath(kAttack2SpritePath).c_str(), net::kAttack2FrameCount);
+        attack3.Load(ResolveAssetPath(kAttack3SpritePath).c_str(), net::kAttack3FrameCount);
     }
 
     void Unload() {
         idle.Unload();
         run.Unload();
+        attack1.Unload();
+        attack2.Unload();
+        attack3.Unload();
     }
 
-    bool AnyLoaded() const { return idle.loaded || run.loaded; }
+    bool AnyLoaded() const {
+        return idle.loaded || run.loaded || attack1.loaded || attack2.loaded || attack3.loaded;
+    }
+
+    const SpriteSheet* SheetForAnim(net::PlayerAnim anim) const {
+        switch (anim) {
+            case net::PlayerAnim::Run: return run.loaded ? &run : nullptr;
+            case net::PlayerAnim::Attack1: return attack1.loaded ? &attack1 : nullptr;
+            case net::PlayerAnim::Attack2: return attack2.loaded ? &attack2 : nullptr;
+            case net::PlayerAnim::Attack3: return attack3.loaded ? &attack3 : nullptr;
+            case net::PlayerAnim::Hit:
+            case net::PlayerAnim::Dead:
+            case net::PlayerAnim::Idle:
+            default: return idle.loaded ? &idle : nullptr;
+        }
+    }
 
     void Draw(const net::PlayerState& player, uint32_t serverTick, Vector2 center,
               Color tint) const {
@@ -121,23 +151,9 @@ struct PlayerSprites {
         const int frame =
             net::AnimFrameIndex(player.anim, serverTick, player.animStartTick);
 
-        switch (player.anim) {
-            case net::PlayerAnim::Run:
-            case net::PlayerAnim::Attack:
-                if (run.loaded) {
-                    run.Draw(center, tint, frame, player.facingRight);
-                    return;
-                }
-                break;
-            case net::PlayerAnim::Hit:
-            case net::PlayerAnim::Dead:
-            case net::PlayerAnim::Idle:
-            default:
-                if (idle.loaded) {
-                    idle.Draw(center, tint, frame, player.facingRight);
-                    return;
-                }
-                break;
+        if (const SpriteSheet* sheet = SheetForAnim(player.anim)) {
+            sheet->Draw(center, tint, frame, player.facingRight);
+            return;
         }
 
         DrawCircleV(center, net::kPlayerRadius, tint);
@@ -175,7 +191,7 @@ struct GoblinSprites {
 
         const int frame =
             net::GoblinAnimFrameIndex(enemy.anim, serverTick, enemy.animStartTick);
-        if (enemy.anim == net::PlayerAnim::Attack && run.loaded) {
+        if (enemy.anim == net::PlayerAnim::Attack1 && run.loaded) {
             run.Draw(center, tint, frame % run.frameCount, enemy.facingRight,
                      net::kGoblinSpriteHeight);
             return;
@@ -269,6 +285,42 @@ static Rectangle ChatToggleButtonRect() {
         24.0f,
         24.0f,
     };
+}
+
+static bool IsLocalPlayerEngaged() {
+    if (gClient.GetState() != net::ClientConnectionState::Joined) {
+        return false;
+    }
+
+    for (const net::PlayerState& player : gClient.GetPlayers()) {
+        if (player.id != gClient.GetLocalPlayerId()) {
+            continue;
+        }
+        return player.targetId >= 0 || player.state == net::EntityState::Combat;
+    }
+    return false;
+}
+
+static Rectangle CombatCancelButtonRect() {
+    return {
+        static_cast<float>(GameViewport::kVirtualWidth - 52),
+        20.0f,
+        32.0f,
+        32.0f,
+    };
+}
+
+static void DrawCombatCancelButton() {
+    if (!IsLocalPlayerEngaged()) {
+        return;
+    }
+
+    const Rectangle bounds = CombatCancelButtonRect();
+    const Vector2 mouse = GetVirtualMousePosition();
+    const bool hover = CheckCollisionPointRec(mouse, bounds);
+    DrawRectangleRec(bounds, hover ? Color{180, 60, 60, 255} : Color{120, 44, 44, 255});
+    DrawRectangleLinesEx(bounds, 1.0f, Color{220, 120, 120, 255});
+    DrawText("X", static_cast<int>(bounds.x + 10), static_cast<int>(bounds.y + 7), 18, RAYWHITE);
 }
 
 static bool IsMouseOverChatPanel(Vector2 virtualPos) {
@@ -457,6 +509,11 @@ static void HandleUiClicks() {
         } else {
             gChatExpanded = true;
         }
+        return;
+    }
+
+    if (IsLocalPlayerEngaged() && WasUiButtonPressed(CombatCancelButtonRect())) {
+        gClient.SendCancelCombat();
         return;
     }
 }
@@ -819,6 +876,7 @@ static void DrawGame() {
 
     DrawText("Multiplayer Template", 20, 20, 24, RAYWHITE);
     DrawText(gStatusText.c_str(), 20, 52, 18, LIGHTGRAY);
+    DrawCombatCancelButton();
 
     if (gEditingName) {
         DrawText("Name:", 20, 100, 20, RAYWHITE);

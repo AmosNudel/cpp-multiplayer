@@ -24,8 +24,14 @@ inline constexpr int kIdleFrameCount = 7;
 inline constexpr int kIdleAnimTicksPerFrame = 2;
 inline constexpr int kRunFrameCount = 8;
 inline constexpr int kRunAnimTicksPerFrame = 1;
-inline constexpr int kAttackFrameCount = 4;
+inline constexpr int kAttack1FrameCount = 6;
+inline constexpr int kAttack2FrameCount = 5;
+inline constexpr int kAttack3FrameCount = 6;
+inline constexpr int kAttack1DamageFrame = 3;
+inline constexpr int kAttack2DamageFrame = 1;
+inline constexpr int kAttack3DamageFrame = 2;
 inline constexpr int kAttackAnimTicksPerFrame = 2;
+inline constexpr int kComboPauseTicks = 4;
 inline constexpr int kHitFrameCount = 4;
 inline constexpr int kHitAnimTicksPerFrame = 2;
 inline constexpr int kDeadFrameCount = 1;
@@ -35,7 +41,9 @@ inline constexpr int kMaxChatLength = 120;
 enum class PlayerAnim {
     Idle,
     Run,
-    Attack,
+    Attack1,
+    Attack2,
+    Attack3,
     Hit,
     Dead,
 };
@@ -44,7 +52,9 @@ inline const char* PlayerAnimName(PlayerAnim anim) {
     switch (anim) {
         case PlayerAnim::Idle: return "idle";
         case PlayerAnim::Run: return "run";
-        case PlayerAnim::Attack: return "attack";
+        case PlayerAnim::Attack1: return "attack1";
+        case PlayerAnim::Attack2: return "attack2";
+        case PlayerAnim::Attack3: return "attack3";
         case PlayerAnim::Hit: return "hit";
         case PlayerAnim::Dead: return "dead";
     }
@@ -53,7 +63,9 @@ inline const char* PlayerAnimName(PlayerAnim anim) {
 
 inline PlayerAnim ParsePlayerAnim(const std::string& value) {
     if (value == "run") return PlayerAnim::Run;
-    if (value == "attack") return PlayerAnim::Attack;
+    if (value == "attack" || value == "attack1") return PlayerAnim::Attack1;
+    if (value == "attack2") return PlayerAnim::Attack2;
+    if (value == "attack3") return PlayerAnim::Attack3;
     if (value == "hit") return PlayerAnim::Hit;
     if (value == "dead") return PlayerAnim::Dead;
     return PlayerAnim::Idle;
@@ -63,7 +75,9 @@ inline int AnimFrameCount(PlayerAnim anim) {
     switch (anim) {
         case PlayerAnim::Idle: return kIdleFrameCount;
         case PlayerAnim::Run: return kRunFrameCount;
-        case PlayerAnim::Attack: return kAttackFrameCount;
+        case PlayerAnim::Attack1: return kAttack1FrameCount;
+        case PlayerAnim::Attack2: return kAttack2FrameCount;
+        case PlayerAnim::Attack3: return kAttack3FrameCount;
         case PlayerAnim::Hit: return kHitFrameCount;
         case PlayerAnim::Dead: return kDeadFrameCount;
     }
@@ -74,11 +88,28 @@ inline int AnimTicksPerFrame(PlayerAnim anim) {
     switch (anim) {
         case PlayerAnim::Idle: return kIdleAnimTicksPerFrame;
         case PlayerAnim::Run: return kRunAnimTicksPerFrame;
-        case PlayerAnim::Attack: return kAttackAnimTicksPerFrame;
+        case PlayerAnim::Attack1:
+        case PlayerAnim::Attack2:
+        case PlayerAnim::Attack3:
+            return kAttackAnimTicksPerFrame;
         case PlayerAnim::Hit: return kHitAnimTicksPerFrame;
         case PlayerAnim::Dead: return kDeadAnimTicksPerFrame;
     }
     return kIdleAnimTicksPerFrame;
+}
+
+inline int AttackDamageFrame(PlayerAnim anim) {
+    switch (anim) {
+        case PlayerAnim::Attack1: return kAttack1DamageFrame;
+        case PlayerAnim::Attack2: return kAttack2DamageFrame;
+        case PlayerAnim::Attack3: return kAttack3DamageFrame;
+        default: return -1;
+    }
+}
+
+inline bool IsAttackAnim(PlayerAnim anim) {
+    return anim == PlayerAnim::Attack1 || anim == PlayerAnim::Attack2 ||
+           anim == PlayerAnim::Attack3;
 }
 
 inline int AnimFrameIndex(PlayerAnim anim, uint32_t serverTick, uint32_t animStartTick) {

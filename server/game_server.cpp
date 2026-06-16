@@ -136,17 +136,6 @@ EnemyState* FindEnemy(std::vector<EnemyState>& enemies, int enemyId) {
     return nullptr;
 }
 
-void BeginCombat(PlayerState& player, EnemyState& enemy, uint32_t tick) {
-    player.targetId = enemy.id;
-    enemy.targetId = player.id;
-    TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
-                     EntityState::Combat, tick);
-    TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
-                     EntityState::Combat, tick);
-    UpdateFacingFromDirection(player, enemy.x - player.x, enemy.y - player.y);
-    UpdateEnemyFacing(enemy, player.x - enemy.x, player.y - enemy.y);
-}
-
 void EndPlayerCombat(PlayerState& player, std::vector<EnemyState>& enemies, uint32_t tick) {
     if (player.targetId >= 0) {
         if (EnemyState* enemy = FindEnemy(enemies, player.targetId)) {
@@ -162,6 +151,40 @@ void EndPlayerCombat(PlayerState& player, std::vector<EnemyState>& enemies, uint
         TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
                          EntityState::Idle, tick);
     }
+}
+
+void ResetPlayerCombo(ConnectedClient& client) {
+    client.comboPhase = PlayerComboPhase::None;
+    client.comboPhaseStartTick = 0;
+    client.comboSwingDamageDealt = false;
+}
+
+void StartPlayerComboPhase(PlayerState& player, ConnectedClient& client, PlayerComboPhase phase,
+                           PlayerAnim anim, uint32_t tick) {
+    client.comboPhase = phase;
+    client.comboPhaseStartTick = tick;
+    client.comboSwingDamageDealt = false;
+    SetEntityAnim(player.anim, player.animStartTick, anim, tick);
+}
+
+void BeginCombat(PlayerState& player, EnemyState& enemy, ConnectedClient& client, uint32_t tick) {
+    player.targetId = enemy.id;
+    enemy.targetId = player.id;
+    TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                     EntityState::Combat, tick);
+    TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
+                     EntityState::Combat, tick);
+    UpdateFacingFromDirection(player, enemy.x - player.x, enemy.y - player.y);
+    UpdateEnemyFacing(enemy, player.x - enemy.x, player.y - enemy.y);
+    StartPlayerComboPhase(player, client, PlayerComboPhase::Attack1, PlayerAnim::Attack1, tick);
+}
+
+void CancelPlayerCombat(PlayerState& player, ConnectedClient& client,
+                        std::vector<EnemyState>& enemies, uint32_t tick) {
+    client.pendingAttackEnemyId = -1;
+    ResetPlayerCombo(client);
+    ClearPlayerMove(client, player);
+    EndPlayerCombat(player, enemies, tick);
 }
 
 void ApplyDamageToEnemy(EnemyState& enemy, int damage, uint32_t tick) {
@@ -198,35 +221,84 @@ void ApplyDamageToPlayer(PlayerState& player, int damage, uint32_t tick) {
                      EntityState::Hit, tick);
 }
 
-bool TryPerformPlayerAttack(PlayerState& player, ConnectedClient& client,
-                            std::vector<EnemyState>& enemies, uint32_t tick) {
-    if (player.state != EntityState::Combat || player.targetId < 0) {
-        return false;
+void TryApplyComboSwingDamage(PlayerState& player, ConnectedClient& client, EnemyState& enemy,
+                              uint32_t tick) {
+    if (!IsAttackAnim(player.anim) || client.comboSwingDamageDealt) {
+        return;
     }
 
-    EnemyState* enemy = FindEnemy(enemies, player.targetId);
-    if (enemy == nullptr || !IsAlive(enemy->state)) {
-        return false;
+    const int damageFrame = AttackDamageFrame(player.anim);
+    if (damageFrame < 0) {
+        return;
     }
 
-    if (!IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
-        return false;
+    const int currentFrame = CurrentAnimFrame(player.anim, tick, player.animStartTick);
+    if (currentFrame != damageFrame) {
+        return;
     }
 
-    if (tick - client.lastAttackTick < static_cast<uint32_t>(kAttackCooldownTicks)) {
-        return false;
-    }
-
-    client.lastAttackTick = tick;
-    UpdateFacingFromDirection(player, enemy->x - player.x, enemy->y - player.y);
-    SetEntityAnim(player.anim, player.animStartTick, PlayerAnim::Attack, tick);
-    ApplyDamageToEnemy(*enemy, kPlayerAttackDamage, tick);
-    if (!IsAlive(enemy->state)) {
+    client.comboSwingDamageDealt = true;
+    ApplyDamageToEnemy(enemy, kPlayerAttackDamage, tick);
+    if (!IsAlive(enemy.state)) {
         player.targetId = -1;
+        ResetPlayerCombo(client);
         TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
                          EntityState::Idle, tick);
     }
-    return true;
+}
+
+void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
+                       std::vector<EnemyState>& enemies, uint32_t tick) {
+    EnemyState* enemy = FindEnemy(enemies, player.targetId);
+    if (enemy == nullptr || !IsAlive(enemy->state) ||
+        !IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
+        CancelPlayerCombat(player, client, enemies, tick);
+        return;
+    }
+
+    UpdateFacingFromDirection(player, enemy->x - player.x, enemy->y - player.y);
+    TryApplyComboSwingDamage(player, client, *enemy, tick);
+
+    if (!IsAlive(enemy->state)) {
+        return;
+    }
+
+    switch (client.comboPhase) {
+        case PlayerComboPhase::Attack1:
+            if (IsAnimFinished(PlayerAnim::Attack1, tick, player.animStartTick)) {
+                StartPlayerComboPhase(player, client, PlayerComboPhase::PauseAfter1,
+                                      PlayerAnim::Idle, tick);
+            }
+            break;
+        case PlayerComboPhase::PauseAfter1:
+            if (tick - client.comboPhaseStartTick >= static_cast<uint32_t>(kComboPauseTicks)) {
+                StartPlayerComboPhase(player, client, PlayerComboPhase::Attack2,
+                                      PlayerAnim::Attack2, tick);
+            }
+            break;
+        case PlayerComboPhase::Attack2:
+            if (IsAnimFinished(PlayerAnim::Attack2, tick, player.animStartTick)) {
+                StartPlayerComboPhase(player, client, PlayerComboPhase::PauseAfter2,
+                                      PlayerAnim::Idle, tick);
+            }
+            break;
+        case PlayerComboPhase::PauseAfter2:
+            if (tick - client.comboPhaseStartTick >= static_cast<uint32_t>(kComboPauseTicks)) {
+                StartPlayerComboPhase(player, client, PlayerComboPhase::Attack3,
+                                      PlayerAnim::Attack3, tick);
+            }
+            break;
+        case PlayerComboPhase::Attack3:
+            if (IsAnimFinished(PlayerAnim::Attack3, tick, player.animStartTick)) {
+                StartPlayerComboPhase(player, client, PlayerComboPhase::Attack1,
+                                      PlayerAnim::Attack1, tick);
+            }
+            break;
+        case PlayerComboPhase::None:
+            StartPlayerComboPhase(player, client, PlayerComboPhase::Attack1,
+                                  PlayerAnim::Attack1, tick);
+            break;
+    }
 }
 
 bool TryPerformEnemyAttack(EnemyState& enemy, std::vector<PlayerState>& players, uint32_t tick) {
@@ -243,13 +315,13 @@ bool TryPerformEnemyAttack(EnemyState& enemy, std::vector<PlayerState>& players,
         return false;
     }
 
-    if (tick - enemy.lastAttackTick < static_cast<uint32_t>(kAttackCooldownTicks)) {
+    if (tick - enemy.lastAttackTick < static_cast<uint32_t>(kGoblinAttackCooldownTicks)) {
         return false;
     }
 
     enemy.lastAttackTick = tick;
     UpdateEnemyFacing(enemy, player->x - enemy.x, player->y - enemy.y);
-    SetEntityAnim(enemy.anim, enemy.animStartTick, PlayerAnim::Attack, tick);
+    SetEntityAnim(enemy.anim, enemy.animStartTick, PlayerAnim::Attack1, tick);
 
     if (PlayerState* mutablePlayer = FindPlayer(players, enemy.targetId)) {
         ApplyDamageToPlayer(*mutablePlayer, kGoblinAttackDamage, tick);
@@ -280,7 +352,7 @@ void TryCompletePendingEngage(ConnectedClient& client, PlayerState& player,
         return;
     }
 
-    BeginCombat(player, *enemy, tick);
+    BeginCombat(player, *enemy, client, tick);
 }
 
 bool StepPlayerMovement(PlayerState& player, ConnectedClient& client, uint32_t tick) {
@@ -347,6 +419,7 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
     }
 
     if (player.state == EntityState::Hit) {
+        ResetPlayerCombo(client);
         ClearPlayerMove(client, player);
         if (tick - player.stateStartTick >= static_cast<uint32_t>(kHitStunTicks)) {
             if (player.hp <= 0) {
@@ -358,6 +431,8 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
                     IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
                     TransitionEntity(player.state, player.stateStartTick, player.anim,
                                      player.animStartTick, EntityState::Combat, tick);
+                    StartPlayerComboPhase(player, client, PlayerComboPhase::Attack1,
+                                          PlayerAnim::Attack1, tick);
                 } else {
                     EndPlayerCombat(player, enemies, tick);
                     TransitionEntity(player.state, player.stateStartTick, player.anim,
@@ -384,17 +459,7 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
     }
 
     if (player.state == EntityState::Combat) {
-        EnemyState* enemy = FindEnemy(enemies, player.targetId);
-        if (enemy == nullptr || !IsAlive(enemy->state) ||
-            !IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
-            EndPlayerCombat(player, enemies, tick);
-            TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
-                             EntityState::Idle, tick);
-            return;
-        }
-
-        UpdateFacingFromDirection(player, enemy->x - player.x, enemy->y - player.y);
-        TryPerformPlayerAttack(player, client, enemies, tick);
+        UpdatePlayerCombo(player, client, enemies, tick);
         return;
     }
 }
@@ -461,7 +526,7 @@ void HandlePlayerEngageRequest(PlayerState& player, ConnectedClient& client,
 
     if (IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
         client.pendingAttackEnemyId = -1;
-        BeginCombat(player, *enemy, tick);
+        BeginCombat(player, *enemy, client, tick);
         return;
     }
 
@@ -692,6 +757,20 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
                                       tick_);
             break;
         }
+        case MessageType::CancelCombatRequest: {
+            auto it = clients_.find(incoming.clientId);
+            if (it == clients_.end() || !it->second.hasJoined) {
+                return;
+            }
+
+            PlayerState* player = FindPlayer(players_, incoming.clientId);
+            if (player == nullptr) {
+                return;
+            }
+
+            CancelPlayerCombat(*player, it->second, enemies_, tick_);
+            break;
+        }
         case MessageType::Ping: {
             SendToClient(incoming.clientId, incoming.transport,
                          MakePong(incoming.message.ping.clientTimeMs, NowMs()));
@@ -730,7 +809,10 @@ void GameServer::HandleDisconnect(int clientId, TransportKind transport) {
     }
 
     if (PlayerState* player = FindPlayer(players_, clientId)) {
-        EndPlayerCombat(*player, enemies_, tick_);
+        auto clientIt = clients_.find(clientId);
+        if (clientIt != clients_.end()) {
+            CancelPlayerCombat(*player, clientIt->second, enemies_, tick_);
+        }
         (void)player;
     }
 

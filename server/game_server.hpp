@@ -19,6 +19,15 @@ enum class TransportKind {
     WebSocket,
 };
 
+enum class PlayerComboPhase : uint8_t {
+    None,
+    Attack1,
+    PauseAfter1,
+    Attack2,
+    PauseAfter2,
+    Attack3,
+};
+
 struct ConnectedClient {
     int id = 0;
     TransportKind transport = TransportKind::Tcp;
@@ -30,6 +39,9 @@ struct ConnectedClient {
     std::vector<std::pair<int, int>> movePath;
     size_t pathIndex = 0;
     int pendingAttackEnemyId = -1;
+    PlayerComboPhase comboPhase = PlayerComboPhase::None;
+    uint32_t comboPhaseStartTick = 0;
+    bool comboSwingDamageDealt = false;
     uint32_t lastAttackTick = 0;
 };
 

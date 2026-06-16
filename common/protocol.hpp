@@ -19,6 +19,7 @@ enum class MessageType {
     JoinRejected,
     MoveRequest,
     AttackRequest,
+    CancelCombatRequest,
     WorldState,
     PlayerLeft,
     Ping,
@@ -35,6 +36,8 @@ struct MoveRequest {
 struct AttackRequest {
     int enemyId = 0;
 };
+
+struct CancelCombatRequest {};
 
 struct PlayerState {
     int id = 0;
@@ -102,6 +105,7 @@ struct Message {
     JoinRejected joinRejected;
     MoveRequest moveRequest;
     AttackRequest attackRequest;
+    CancelCombatRequest cancelCombatRequest;
     WorldState worldState;
     PlayerLeft playerLeft;
     PingMessage ping;
@@ -119,6 +123,7 @@ Message MakeJoinAccepted(int playerId, const std::vector<PlayerState>& players,
 Message MakeJoinRejected(const std::string& reason);
 Message MakeMoveRequest(int col, int row);
 Message MakeAttackRequest(int enemyId);
+Message MakeCancelCombatRequest();
 Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players,
                        const std::vector<EnemyState>& enemies);
 Message MakePlayerLeft(int playerId);

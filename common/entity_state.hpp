@@ -19,8 +19,8 @@ inline constexpr int kPlayerMaxHp = 100;
 inline constexpr int kGoblinMaxHp = 30;
 inline constexpr int kPlayerAttackDamage = 10;
 inline constexpr int kGoblinAttackDamage = 8;
-inline constexpr int kAttackCooldownTicks = 12;
 inline constexpr int kHitStunTicks = 8;
+inline constexpr int kGoblinAttackCooldownTicks = 12;
 inline constexpr float kEntityPickRadius = kPlayerRadius * 1.4f;
 
 inline const char* EntityStateName(EntityState state) {
@@ -45,9 +45,9 @@ inline EntityState ParseEntityState(const std::string& value) {
 inline PlayerAnim AnimForEntityState(EntityState state) {
     switch (state) {
         case EntityState::Moving: return PlayerAnim::Run;
-        case EntityState::Combat: return PlayerAnim::Attack;
         case EntityState::Hit: return PlayerAnim::Hit;
         case EntityState::Dead: return PlayerAnim::Dead;
+        case EntityState::Combat: return PlayerAnim::Attack1;
         case EntityState::Idle:
         default: return PlayerAnim::Idle;
     }

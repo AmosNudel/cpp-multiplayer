@@ -77,4 +77,35 @@ void SetEntityAnim(PlayerAnim& anim, uint32_t& animStartTick, PlayerAnim newAnim
     animStartTick = tick;
 }
 
+int CurrentAnimFrame(PlayerAnim anim, uint32_t tick, uint32_t animStartTick) {
+    if (tick < animStartTick) {
+        return 0;
+    }
+
+    const uint32_t elapsed = tick - animStartTick;
+    const int frameCount = AnimFrameCount(anim);
+    const int ticksPerFrame = AnimTicksPerFrame(anim);
+    if (frameCount <= 0 || ticksPerFrame <= 0) {
+        return 0;
+    }
+
+    const int frame = static_cast<int>(elapsed / static_cast<uint32_t>(ticksPerFrame));
+    return frame >= frameCount ? frameCount - 1 : frame;
+}
+
+bool IsAnimFinished(PlayerAnim anim, uint32_t tick, uint32_t animStartTick) {
+    if (tick < animStartTick) {
+        return false;
+    }
+
+    const uint32_t elapsed = tick - animStartTick;
+    const int frameCount = AnimFrameCount(anim);
+    const int ticksPerFrame = AnimTicksPerFrame(anim);
+    if (frameCount <= 0 || ticksPerFrame <= 0) {
+        return true;
+    }
+
+    return elapsed >= static_cast<uint32_t>(frameCount * ticksPerFrame);
+}
+
 }  // namespace net

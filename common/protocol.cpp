@@ -112,6 +112,7 @@ const char* MessageTypeName(MessageType type) {
         case MessageType::JoinRejected: return "join_rejected";
         case MessageType::MoveRequest: return "move_request";
         case MessageType::AttackRequest: return "attack_request";
+        case MessageType::CancelCombatRequest: return "cancel_combat_request";
         case MessageType::WorldState: return "world_state";
         case MessageType::PlayerLeft: return "player_left";
         case MessageType::Ping: return "ping";
@@ -128,6 +129,7 @@ MessageType ParseMessageType(const std::string& value) {
     if (value == "join_rejected") return MessageType::JoinRejected;
     if (value == "move_request") return MessageType::MoveRequest;
     if (value == "attack_request") return MessageType::AttackRequest;
+    if (value == "cancel_combat_request") return MessageType::CancelCombatRequest;
     if (value == "world_state") return MessageType::WorldState;
     if (value == "player_left") return MessageType::PlayerLeft;
     if (value == "ping") return MessageType::Ping;
@@ -173,6 +175,12 @@ Message MakeAttackRequest(int enemyId) {
     Message message;
     message.type = MessageType::AttackRequest;
     message.attackRequest.enemyId = enemyId;
+    return message;
+}
+
+Message MakeCancelCombatRequest() {
+    Message message;
+    message.type = MessageType::CancelCombatRequest;
     return message;
 }
 
@@ -260,6 +268,8 @@ std::string SerializeMessage(const Message& message) {
         case MessageType::AttackRequest:
             json["enemy_id"] = message.attackRequest.enemyId;
             break;
+        case MessageType::CancelCombatRequest:
+            break;
         case MessageType::WorldState:
             json["tick"] = message.worldState.tick;
             json["players"] = nlohmann::json::array();
@@ -326,6 +336,8 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
                 break;
             case MessageType::AttackRequest:
                 message.attackRequest.enemyId = json.at("enemy_id").get<int>();
+                break;
+            case MessageType::CancelCombatRequest:
                 break;
             case MessageType::WorldState:
                 message.worldState.tick = json.at("tick").get<uint32_t>();

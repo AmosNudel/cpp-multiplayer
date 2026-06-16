@@ -30,6 +30,7 @@ public:
     void Update();
     void SendMoveRequest(int col, int row);
     void SendAttackRequest(int enemyId);
+    void SendCancelCombat();
     void SendChat(const std::string& text);
 
     ClientConnectionState GetState() const { return state_; }
