@@ -7,6 +7,7 @@
 void WorldView::Reset() {
     zoom_ = 1.0f;
     target_ = {net::kWorldWidth * 0.5f, net::kWorldHeight * 0.5f};
+    panning_ = false;
 }
 
 void WorldView::ClampTarget() {
@@ -37,8 +38,30 @@ Vector2 WorldView::WorldToVirtual(Vector2 worldPos) const {
     return GetWorldToScreen2D(worldPos, BuildCamera());
 }
 
-void WorldView::UpdateInput(Vector2 virtualMousePos, bool allowZoom) {
-    if (!allowZoom) {
+void WorldView::UpdateInput(Vector2 virtualMousePos, bool allowInput) {
+    if (IsMouseButtonReleased(MOUSE_BUTTON_MIDDLE)) {
+        panning_ = false;
+    }
+
+    if (!allowInput) {
+        return;
+    }
+
+    if (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) &&
+        CheckCollisionPointRec(virtualMousePos, GridVirtualRect())) {
+        panning_ = true;
+        panStartMouse_ = virtualMousePos;
+        panStartTarget_ = target_;
+    }
+
+    if (panning_ && IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
+        const Vector2 delta = {
+            virtualMousePos.x - panStartMouse_.x,
+            virtualMousePos.y - panStartMouse_.y,
+        };
+        target_.x = panStartTarget_.x - delta.x / zoom_;
+        target_.y = panStartTarget_.y - delta.y / zoom_;
+        ClampTarget();
         return;
     }
 

@@ -343,6 +343,9 @@ static void HandleMapClick() {
     if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         return;
     }
+    if (gWorldView.IsPanning() || IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
+        return;
+    }
 
     const Vector2 screenPos = GetMousePosition();
     if (!gViewport.ContainsScreenPoint(screenPos)) {
@@ -524,14 +527,14 @@ static void UpdateGame() {
     gClient.Update();
 
     const Vector2 virtualMouse = GetVirtualMousePosition();
-    const bool allowZoom = !gEditingName && !gChatExpanded
+    const bool allowCameraInput = !gEditingName && !gChatExpanded
 #if !defined(PLATFORM_WEB)
-                           && !gOptionsOpen
+                                  && !gOptionsOpen
 #endif
         ;
-    gWorldView.UpdateInput(virtualMouse, allowZoom);
+    gWorldView.UpdateInput(virtualMouse, allowCameraInput);
 
-    if (IsKeyPressed(KEY_R) && allowZoom) {
+    if (IsKeyPressed(KEY_R) && allowCameraInput) {
         gWorldView.Reset();
     }
 
@@ -747,7 +750,8 @@ static void DrawGame() {
     } else {
         DrawText(TextFormat("Tick: %u", gClient.GetServerTick()), 20, 100, 18, GRAY);
         DrawText(TextFormat("Ping: %d ms", gClient.GetPingMs()), 20, 124, 18, GRAY);
-        DrawText(TextFormat("Zoom: %.0f%%   Scroll = zoom   R = reset", gWorldView.Zoom() * 100.0f),
+        DrawText(TextFormat("Zoom: %.0f%%   Scroll = zoom   MMB = pan   R = reset",
+                            gWorldView.Zoom() * 100.0f),
                  20, 148, 16, GRAY);
 #if !defined(PLATFORM_WEB)
         DrawText("F11 = fullscreen   ESC = options", 20, 172, 16, GRAY);
