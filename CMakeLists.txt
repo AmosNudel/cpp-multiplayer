@@ -31,6 +31,7 @@ add_library(net_common STATIC
     common/grid_map.cpp
     common/pathfinding.cpp
     common/enemies.cpp
+    common/combat.cpp
 )
 target_include_directories(net_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(net_common PUBLIC nlohmann_json::nlohmann_json)

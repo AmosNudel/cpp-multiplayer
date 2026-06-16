@@ -142,6 +142,19 @@ void GameClient::SendMoveRequest(int col, int row) {
     }
 }
 
+void GameClient::SendAttackRequest(int enemyId) {
+    if (state_ != ClientConnectionState::Joined || enemyId < 0) {
+        return;
+    }
+
+    const Message message = MakeAttackRequest(enemyId);
+    if (useWebSocket_) {
+        wsClient_.Send(message);
+    } else {
+        tcpClient_.Send(message);
+    }
+}
+
 void GameClient::SendChat(const std::string& text) {
     if (state_ != ClientConnectionState::Joined || text.empty()) {
         return;

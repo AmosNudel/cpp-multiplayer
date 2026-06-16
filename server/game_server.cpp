@@ -6,8 +6,10 @@
 #include <iostream>
 #include <thread>
 
+#include "common/combat.hpp"
 #include "common/config.hpp"
 #include "common/enemies.hpp"
+#include "common/entity_state.hpp"
 #include "common/grid.hpp"
 #include "common/grid_map.hpp"
 #include "common/pathfinding.hpp"
@@ -52,8 +54,433 @@ void UpdateFacingFromDirection(PlayerState& player, float dx, float dy) {
     }
 }
 
+void UpdateEnemyFacing(EnemyState& enemy, float dx, float dy) {
+    (void)dy;
+    if (dx > 0.01f) {
+        enemy.facingRight = true;
+    } else if (dx < -0.01f) {
+        enemy.facingRight = false;
+    }
+}
+
 void SetMoveFacingToward(PlayerState& player, float targetX, float targetY) {
     UpdateFacingFromDirection(player, targetX - player.x, targetY - player.y);
+}
+
+void ClearPlayerMove(ConnectedClient& client, PlayerState& player) {
+    client.hasMoveTarget = false;
+    client.movePath.clear();
+    client.pathIndex = 0;
+    player.moveTargetCol = -1;
+    player.moveTargetRow = -1;
+}
+
+bool StartPlayerPath(ConnectedClient& client, PlayerState& player, const GridMap& map,
+                     int goalCol, int goalRow, uint32_t tick) {
+    const int startCol = WorldToCellCol(player.x);
+    const int startRow = WorldToCellRow(player.y);
+    std::vector<GridPoint> path = FindPath(map, startCol, startRow, goalCol, goalRow);
+    if (path.empty()) {
+        return false;
+    }
+
+    client.movePath = std::move(path);
+    client.pathIndex = 0;
+    if (client.movePath.size() > 1 && client.movePath[0].first == startCol &&
+        client.movePath[0].second == startRow) {
+        client.pathIndex = 1;
+    }
+    if (client.pathIndex >= client.movePath.size()) {
+        ClearPlayerMove(client, player);
+        return false;
+    }
+
+    client.hasMoveTarget = true;
+    client.targetCol = goalCol;
+    client.targetRow = goalRow;
+    player.moveTargetCol = goalCol;
+    player.moveTargetRow = goalRow;
+
+    const auto& firstWaypoint = client.movePath[client.pathIndex];
+    SetMoveFacingToward(player, CellCenterX(firstWaypoint.first),
+                        CellCenterY(firstWaypoint.second));
+    TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                     EntityState::Moving, tick);
+    return true;
+}
+
+PlayerState* FindPlayer(std::vector<PlayerState>& players, int playerId) {
+    for (PlayerState& player : players) {
+        if (player.id == playerId) {
+            return &player;
+        }
+    }
+    return nullptr;
+}
+
+const PlayerState* FindPlayerConst(const std::vector<PlayerState>& players, int playerId) {
+    for (const PlayerState& player : players) {
+        if (player.id == playerId) {
+            return &player;
+        }
+    }
+    return nullptr;
+}
+
+EnemyState* FindEnemy(std::vector<EnemyState>& enemies, int enemyId) {
+    for (EnemyState& enemy : enemies) {
+        if (enemy.id == enemyId) {
+            return &enemy;
+        }
+    }
+    return nullptr;
+}
+
+void BeginCombat(PlayerState& player, EnemyState& enemy, uint32_t tick) {
+    player.targetId = enemy.id;
+    enemy.targetId = player.id;
+    TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                     EntityState::Combat, tick);
+    TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
+                     EntityState::Combat, tick);
+    UpdateFacingFromDirection(player, enemy.x - player.x, enemy.y - player.y);
+    UpdateEnemyFacing(enemy, player.x - enemy.x, player.y - enemy.y);
+}
+
+void EndPlayerCombat(PlayerState& player, std::vector<EnemyState>& enemies, uint32_t tick) {
+    if (player.targetId >= 0) {
+        if (EnemyState* enemy = FindEnemy(enemies, player.targetId)) {
+            enemy->targetId = -1;
+            if (IsAlive(enemy->state) && enemy->state == EntityState::Combat) {
+                TransitionEntity(enemy->state, enemy->stateStartTick, enemy->anim,
+                                 enemy->animStartTick, EntityState::Idle, tick);
+            }
+        }
+    }
+    player.targetId = -1;
+    if (IsAlive(player.state) && player.state == EntityState::Combat) {
+        TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                         EntityState::Idle, tick);
+    }
+}
+
+void ApplyDamageToEnemy(EnemyState& enemy, int damage, uint32_t tick) {
+    if (!IsAlive(enemy.state)) {
+        return;
+    }
+
+    enemy.hp -= damage;
+    if (enemy.hp <= 0) {
+        enemy.hp = 0;
+        TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
+                         EntityState::Dead, tick);
+        return;
+    }
+
+    TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
+                     EntityState::Hit, tick);
+}
+
+void ApplyDamageToPlayer(PlayerState& player, int damage, uint32_t tick) {
+    if (!IsAlive(player.state)) {
+        return;
+    }
+
+    player.hp -= damage;
+    if (player.hp <= 0) {
+        player.hp = 0;
+        TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                         EntityState::Dead, tick);
+        return;
+    }
+
+    TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                     EntityState::Hit, tick);
+}
+
+bool TryPerformPlayerAttack(PlayerState& player, ConnectedClient& client,
+                            std::vector<EnemyState>& enemies, uint32_t tick) {
+    if (player.state != EntityState::Combat || player.targetId < 0) {
+        return false;
+    }
+
+    EnemyState* enemy = FindEnemy(enemies, player.targetId);
+    if (enemy == nullptr || !IsAlive(enemy->state)) {
+        return false;
+    }
+
+    if (!IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
+        return false;
+    }
+
+    if (tick - client.lastAttackTick < static_cast<uint32_t>(kAttackCooldownTicks)) {
+        return false;
+    }
+
+    client.lastAttackTick = tick;
+    UpdateFacingFromDirection(player, enemy->x - player.x, enemy->y - player.y);
+    SetEntityAnim(player.anim, player.animStartTick, PlayerAnim::Attack, tick);
+    ApplyDamageToEnemy(*enemy, kPlayerAttackDamage, tick);
+    if (!IsAlive(enemy->state)) {
+        player.targetId = -1;
+        TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                         EntityState::Idle, tick);
+    }
+    return true;
+}
+
+bool TryPerformEnemyAttack(EnemyState& enemy, std::vector<PlayerState>& players, uint32_t tick) {
+    if (enemy.state != EntityState::Combat || enemy.targetId < 0) {
+        return false;
+    }
+
+    const PlayerState* player = FindPlayerConst(players, enemy.targetId);
+    if (player == nullptr || !IsAlive(player->state) || player->state == EntityState::Hit) {
+        return false;
+    }
+
+    if (!IsInMeleeRange(enemy.x, enemy.y, player->x, player->y)) {
+        return false;
+    }
+
+    if (tick - enemy.lastAttackTick < static_cast<uint32_t>(kAttackCooldownTicks)) {
+        return false;
+    }
+
+    enemy.lastAttackTick = tick;
+    UpdateEnemyFacing(enemy, player->x - enemy.x, player->y - enemy.y);
+    SetEntityAnim(enemy.anim, enemy.animStartTick, PlayerAnim::Attack, tick);
+
+    if (PlayerState* mutablePlayer = FindPlayer(players, enemy.targetId)) {
+        ApplyDamageToPlayer(*mutablePlayer, kGoblinAttackDamage, tick);
+    }
+    return true;
+}
+
+void TryCompletePendingEngage(ConnectedClient& client, PlayerState& player,
+                              std::vector<EnemyState>& enemies, uint32_t tick) {
+    if (client.pendingAttackEnemyId < 0) {
+        return;
+    }
+
+    const int enemyId = client.pendingAttackEnemyId;
+    client.pendingAttackEnemyId = -1;
+
+    EnemyState* enemy = FindEnemy(enemies, enemyId);
+    if (enemy == nullptr || !IsAlive(enemy->state)) {
+        EndPlayerCombat(player, enemies, tick);
+        TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                         EntityState::Idle, tick);
+        return;
+    }
+
+    if (!IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
+        TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                         EntityState::Idle, tick);
+        return;
+    }
+
+    BeginCombat(player, *enemy, tick);
+}
+
+bool StepPlayerMovement(PlayerState& player, ConnectedClient& client, uint32_t tick) {
+    if (!client.hasMoveTarget || client.pathIndex >= client.movePath.size()) {
+        return false;
+    }
+
+    float remainingStep = kPlayerSpeed * kTickDuration;
+    static constexpr float kArriveEpsilon = 0.5f;
+    bool moved = false;
+
+    while (remainingStep > 0.0f && client.pathIndex < client.movePath.size()) {
+        const auto& waypoint = client.movePath[client.pathIndex];
+        const float targetX = CellCenterX(waypoint.first);
+        const float targetY = CellCenterY(waypoint.second);
+        float dx = targetX - player.x;
+        float dy = targetY - player.y;
+        const float dist = std::sqrt(dx * dx + dy * dy);
+
+        if (dist <= kArriveEpsilon) {
+            player.x = targetX;
+            player.y = targetY;
+            ++client.pathIndex;
+            moved = true;
+            if (client.pathIndex >= client.movePath.size()) {
+                ClearPlayerMove(client, player);
+            }
+            continue;
+        }
+
+        dx /= dist;
+        dy /= dist;
+        UpdateFacingFromDirection(player, dx, dy);
+
+        if (dist <= remainingStep) {
+            player.x = targetX;
+            player.y = targetY;
+            remainingStep -= dist;
+            ++client.pathIndex;
+            moved = true;
+            if (client.pathIndex >= client.movePath.size()) {
+                ClearPlayerMove(client, player);
+            }
+        } else {
+            player.x += dx * remainingStep;
+            player.y += dy * remainingStep;
+            remainingStep = 0.0f;
+            moved = true;
+        }
+    }
+
+    if (moved && player.state == EntityState::Moving) {
+        SetEntityAnim(player.anim, player.animStartTick, PlayerAnim::Run, tick);
+    }
+
+    return moved;
+}
+
+void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
+                        std::vector<EnemyState>& enemies, uint32_t tick) {
+    if (player.state == EntityState::Dead) {
+        ClearPlayerMove(client, player);
+        return;
+    }
+
+    if (player.state == EntityState::Hit) {
+        ClearPlayerMove(client, player);
+        if (tick - player.stateStartTick >= static_cast<uint32_t>(kHitStunTicks)) {
+            if (player.hp <= 0) {
+                TransitionEntity(player.state, player.stateStartTick, player.anim,
+                                 player.animStartTick, EntityState::Dead, tick);
+            } else if (player.targetId >= 0) {
+                EnemyState* enemy = FindEnemy(enemies, player.targetId);
+                if (enemy != nullptr && IsAlive(enemy->state) &&
+                    IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
+                    TransitionEntity(player.state, player.stateStartTick, player.anim,
+                                     player.animStartTick, EntityState::Combat, tick);
+                } else {
+                    EndPlayerCombat(player, enemies, tick);
+                    TransitionEntity(player.state, player.stateStartTick, player.anim,
+                                     player.animStartTick, EntityState::Idle, tick);
+                }
+            } else {
+                TransitionEntity(player.state, player.stateStartTick, player.anim,
+                                 player.animStartTick, EntityState::Idle, tick);
+            }
+        }
+        return;
+    }
+
+    if (player.state == EntityState::Moving || client.hasMoveTarget) {
+        StepPlayerMovement(player, client, tick);
+        if (!client.hasMoveTarget) {
+            TryCompletePendingEngage(client, player, enemies, tick);
+            if (player.state == EntityState::Moving) {
+                TransitionEntity(player.state, player.stateStartTick, player.anim,
+                                 player.animStartTick, EntityState::Idle, tick);
+            }
+        }
+        return;
+    }
+
+    if (player.state == EntityState::Combat) {
+        EnemyState* enemy = FindEnemy(enemies, player.targetId);
+        if (enemy == nullptr || !IsAlive(enemy->state) ||
+            !IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
+            EndPlayerCombat(player, enemies, tick);
+            TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                             EntityState::Idle, tick);
+            return;
+        }
+
+        UpdateFacingFromDirection(player, enemy->x - player.x, enemy->y - player.y);
+        TryPerformPlayerAttack(player, client, enemies, tick);
+        return;
+    }
+}
+
+void UpdateEnemyEntity(EnemyState& enemy, std::vector<PlayerState>& players, uint32_t tick) {
+    if (enemy.state == EntityState::Dead) {
+        return;
+    }
+
+    if (enemy.state == EntityState::Hit) {
+        if (tick - enemy.stateStartTick >= static_cast<uint32_t>(kHitStunTicks)) {
+            if (enemy.hp <= 0) {
+                TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim,
+                                 enemy.animStartTick, EntityState::Dead, tick);
+            } else if (enemy.targetId >= 0) {
+                const PlayerState* player = FindPlayerConst(players, enemy.targetId);
+                if (player != nullptr && IsAlive(player->state) &&
+                    IsInMeleeRange(enemy.x, enemy.y, player->x, player->y)) {
+                    TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim,
+                                     enemy.animStartTick, EntityState::Combat, tick);
+                } else {
+                    enemy.targetId = -1;
+                    TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim,
+                                     enemy.animStartTick, EntityState::Idle, tick);
+                }
+            } else {
+                TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim,
+                                 enemy.animStartTick, EntityState::Idle, tick);
+            }
+        }
+        return;
+    }
+
+    if (enemy.state == EntityState::Combat) {
+        const PlayerState* player = FindPlayerConst(players, enemy.targetId);
+        if (player == nullptr || !IsAlive(player->state) ||
+            !IsInMeleeRange(enemy.x, enemy.y, player->x, player->y)) {
+            enemy.targetId = -1;
+            TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
+                             EntityState::Idle, tick);
+            return;
+        }
+
+        TryPerformEnemyAttack(enemy, players, tick);
+    }
+}
+
+void HandlePlayerEngageRequest(PlayerState& player, ConnectedClient& client,
+                               std::vector<EnemyState>& enemies, int enemyId,
+                               const GridMap& map, uint32_t tick) {
+    if (!CanAcceptAttackIntent(player.state)) {
+        return;
+    }
+
+    EnemyState* enemy = FindEnemy(enemies, enemyId);
+    if (enemy == nullptr || !IsAlive(enemy->state)) {
+        return;
+    }
+
+    EndPlayerCombat(player, enemies, tick);
+    ClearPlayerMove(client, player);
+    client.pendingAttackEnemyId = enemyId;
+    player.targetId = enemyId;
+
+    if (IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
+        client.pendingAttackEnemyId = -1;
+        BeginCombat(player, *enemy, tick);
+        return;
+    }
+
+    const int playerCol = WorldToCellCol(player.x);
+    const int playerRow = WorldToCellRow(player.y);
+    const int enemyCol = WorldToCellCol(enemy->x);
+    const int enemyRow = WorldToCellRow(enemy->y);
+    const std::optional<GridPoint> approach =
+        FindBestAdjacentApproachTile(map, playerCol, playerRow, enemyCol, enemyRow);
+    if (!approach.has_value()) {
+        client.pendingAttackEnemyId = -1;
+        player.targetId = -1;
+        return;
+    }
+
+    if (!StartPlayerPath(client, player, map, approach->first, approach->second, tick)) {
+        client.pendingAttackEnemyId = -1;
+        player.targetId = -1;
+    }
 }
 
 }  // namespace
@@ -79,6 +506,7 @@ bool GameServer::Start(uint16_t tcpPort, uint16_t wsPort) {
     running_ = true;
     enemies_ = CreateDefaultEnemies();
     for (EnemyState& enemy : enemies_) {
+        enemy.stateStartTick = tick_;
         enemy.animStartTick = tick_;
     }
     return true;
@@ -198,10 +626,13 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             player.name = client.name;
             player.x = CellCenterX(spawnCol);
             player.y = CellCenterY(spawnRow);
+            player.state = EntityState::Idle;
             player.anim = PlayerAnim::Idle;
-            player.animStartTick =
+            player.stateStartTick =
                 tick_ + static_cast<uint32_t>(incoming.clientId % kIdleFrameCount) *
                             static_cast<uint32_t>(kIdleAnimTicksPerFrame);
+            player.animStartTick = player.stateStartTick;
+            player.hp = kPlayerMaxHp;
             player.moveTargetCol = -1;
             player.moveTargetRow = -1;
             players_.push_back(player);
@@ -222,6 +653,11 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
                 return;
             }
 
+            PlayerState* player = FindPlayer(players_, incoming.clientId);
+            if (player == nullptr || !CanAcceptMoveIntent(player->state)) {
+                return;
+            }
+
             const int col = incoming.message.moveRequest.col;
             const int row = incoming.message.moveRequest.row;
             const GridMap& map = DefaultGridMap();
@@ -229,51 +665,31 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
                 return;
             }
 
-            PlayerState* player = nullptr;
-            for (PlayerState& candidate : players_) {
-                if (candidate.id == incoming.clientId) {
-                    player = &candidate;
-                    break;
-                }
+            ConnectedClient& client = it->second;
+            EndPlayerCombat(*player, enemies_, tick_);
+            client.pendingAttackEnemyId = -1;
+            player->targetId = -1;
+            ClearPlayerMove(client, *player);
+
+            if (!StartPlayerPath(client, *player, map, col, row, tick_)) {
+                return;
             }
+            break;
+        }
+        case MessageType::AttackRequest: {
+            auto it = clients_.find(incoming.clientId);
+            if (it == clients_.end() || !it->second.hasJoined) {
+                return;
+            }
+
+            PlayerState* player = FindPlayer(players_, incoming.clientId);
             if (player == nullptr) {
                 return;
             }
 
-            const int startCol = WorldToCellCol(player->x);
-            const int startRow = WorldToCellRow(player->y);
-            std::vector<GridPoint> path =
-                FindPath(map, startCol, startRow, col, row);
-            if (path.empty()) {
-                return;
-            }
-
-            ConnectedClient& client = it->second;
-            client.movePath = std::move(path);
-            client.pathIndex = 0;
-            if (client.movePath.size() > 1 && client.movePath[0].first == startCol &&
-                client.movePath[0].second == startRow) {
-                client.pathIndex = 1;
-            }
-            if (client.pathIndex >= client.movePath.size()) {
-                client.hasMoveTarget = false;
-                client.movePath.clear();
-                player->moveTargetCol = -1;
-                player->moveTargetRow = -1;
-                return;
-            }
-
-            client.hasMoveTarget = true;
-            client.targetCol = col;
-            client.targetRow = row;
-            player->moveTargetCol = col;
-            player->moveTargetRow = row;
-
-            const auto& firstWaypoint = client.movePath[client.pathIndex];
-            SetMoveFacingToward(*player, CellCenterX(firstWaypoint.first),
-                                CellCenterY(firstWaypoint.second));
-            player->anim = PlayerAnim::Run;
-            player->animStartTick = tick_;
+            HandlePlayerEngageRequest(*player, it->second, enemies_,
+                                      incoming.message.attackRequest.enemyId, DefaultGridMap(),
+                                      tick_);
             break;
         }
         case MessageType::Ping: {
@@ -313,6 +729,11 @@ void GameServer::HandleDisconnect(int clientId, TransportKind transport) {
         return;
     }
 
+    if (PlayerState* player = FindPlayer(players_, clientId)) {
+        EndPlayerCombat(*player, enemies_, tick_);
+        (void)player;
+    }
+
     clients_.erase(clientId);
     transportByClientId_.erase(clientId);
     players_.erase(
@@ -329,67 +750,17 @@ void GameServer::SimulateTick() {
             continue;
         }
 
-        ConnectedClient& client = clientIt->second;
-        bool moving = false;
+        UpdatePlayerEntity(player, clientIt->second, enemies_, tick_);
 
-        if (client.hasMoveTarget && client.pathIndex < client.movePath.size()) {
-            moving = true;
-            float remainingStep = kPlayerSpeed * kTickDuration;
-            static constexpr float kArriveEpsilon = 0.5f;
-
-            while (remainingStep > 0.0f && client.pathIndex < client.movePath.size()) {
-                const auto& waypoint = client.movePath[client.pathIndex];
-                const float targetX = CellCenterX(waypoint.first);
-                const float targetY = CellCenterY(waypoint.second);
-                float dx = targetX - player.x;
-                float dy = targetY - player.y;
-                const float dist = std::sqrt(dx * dx + dy * dy);
-
-                if (dist <= kArriveEpsilon) {
-                    player.x = targetX;
-                    player.y = targetY;
-                    ++client.pathIndex;
-                    if (client.pathIndex >= client.movePath.size()) {
-                        client.hasMoveTarget = false;
-                        client.movePath.clear();
-                        player.moveTargetCol = -1;
-                        player.moveTargetRow = -1;
-                    }
-                    continue;
-                }
-
-                dx /= dist;
-                dy /= dist;
-                UpdateFacingFromDirection(player, dx, dy);
-
-                if (dist <= remainingStep) {
-                    player.x = targetX;
-                    player.y = targetY;
-                    remainingStep -= dist;
-                    ++client.pathIndex;
-                    if (client.pathIndex >= client.movePath.size()) {
-                        client.hasMoveTarget = false;
-                        client.movePath.clear();
-                        player.moveTargetCol = -1;
-                        player.moveTargetRow = -1;
-                    }
-                } else {
-                    player.x += dx * remainingStep;
-                    player.y += dy * remainingStep;
-                    remainingStep = 0.0f;
-                }
-            }
+        if (player.state != EntityState::Dead) {
+            const float margin = kPlayerRadius;
+            player.x = std::clamp(player.x, margin, kWorldWidth - margin);
+            player.y = std::clamp(player.y, margin, kWorldHeight - margin);
         }
+    }
 
-        const PlayerAnim desiredAnim = moving ? PlayerAnim::Run : PlayerAnim::Idle;
-        if (player.anim != desiredAnim) {
-            player.anim = desiredAnim;
-            player.animStartTick = tick_;
-        }
-
-        const float margin = kPlayerRadius;
-        player.x = std::clamp(player.x, margin, kWorldWidth - margin);
-        player.y = std::clamp(player.y, margin, kWorldHeight - margin);
+    for (EnemyState& enemy : enemies_) {
+        UpdateEnemyEntity(enemy, players_, tick_);
     }
 }
 

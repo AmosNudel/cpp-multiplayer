@@ -10,7 +10,9 @@ std::vector<EnemyState> CreateDefaultEnemies() {
     goblin.kind = "goblin";
     goblin.x = CellCenterX(kDefaultGoblinCol);
     goblin.y = CellCenterY(kDefaultGoblinRow);
+    goblin.state = EntityState::Idle;
     goblin.anim = PlayerAnim::Idle;
+    goblin.hp = kGoblinMaxHp;
     goblin.facingRight = false;
     return {goblin};
 }

@@ -1,6 +1,8 @@
 #include "raylib.h"
 
 #include <cstdio>
+#include <algorithm>
+#include <optional>
 #include <string>
 
 #include "client/connection_config.hpp"
@@ -9,6 +11,7 @@
 #include "client/world_view.hpp"
 #include "common/config.hpp"
 #include "common/enemies.hpp"
+#include "common/entity_state.hpp"
 #include "common/grid.hpp"
 #include "common/grid_map.hpp"
 
@@ -21,6 +24,7 @@ static const char* kIdleSpritePath =
 static const char* kRunSpritePath =
     "assets/player_sprites/Sprites/with_outline/RUN.png";
 static const char* kGoblinIdleSpritePath = "assets/enemy/Goblin/Idle.png";
+static const char* kGoblinRunSpritePath = "assets/enemy/Goblin/Run.png";
 static const float kPlayerSpriteHeight = 96.0f;
 static constexpr float kGridScreenBottom = WorldView::kGridVirtualY + net::kWorldHeight;
 
@@ -108,16 +112,25 @@ struct PlayerSprites {
 
     void Draw(const net::PlayerState& player, uint32_t serverTick, Vector2 center,
               Color tint) const {
+        if (player.state == net::EntityState::Dead) {
+            tint = Color{80, 80, 80, 160};
+        } else if (player.state == net::EntityState::Hit) {
+            tint = Color{255, 120, 120, 255};
+        }
+
         const int frame =
             net::AnimFrameIndex(player.anim, serverTick, player.animStartTick);
 
         switch (player.anim) {
             case net::PlayerAnim::Run:
+            case net::PlayerAnim::Attack:
                 if (run.loaded) {
                     run.Draw(center, tint, frame, player.facingRight);
                     return;
                 }
                 break;
+            case net::PlayerAnim::Hit:
+            case net::PlayerAnim::Dead:
             case net::PlayerAnim::Idle:
             default:
                 if (idle.loaded) {
@@ -133,16 +146,28 @@ struct PlayerSprites {
 
 struct GoblinSprites {
     SpriteSheet idle;
+    SpriteSheet run;
 
     void Load() {
         idle.Load(ResolveAssetPath(kGoblinIdleSpritePath).c_str(), net::kGoblinIdleFrameCount);
+        run.Load(ResolveAssetPath(kGoblinRunSpritePath).c_str(), net::kRunFrameCount);
     }
 
-    void Unload() { idle.Unload(); }
+    void Unload() {
+        idle.Unload();
+        run.Unload();
+    }
 
     bool Loaded() const { return idle.loaded; }
 
     void Draw(const net::EnemyState& enemy, uint32_t serverTick, Vector2 center) const {
+        Color tint = WHITE;
+        if (enemy.state == net::EntityState::Dead) {
+            tint = Color{80, 80, 80, 160};
+        } else if (enemy.state == net::EntityState::Hit) {
+            tint = Color{255, 160, 160, 255};
+        }
+
         if (!idle.loaded) {
             DrawCircleV(center, net::kPlayerRadius, Color{120, 200, 80, 255});
             return;
@@ -150,7 +175,13 @@ struct GoblinSprites {
 
         const int frame =
             net::GoblinAnimFrameIndex(enemy.anim, serverTick, enemy.animStartTick);
-        idle.Draw(center, WHITE, frame, enemy.facingRight, net::kGoblinSpriteHeight);
+        if (enemy.anim == net::PlayerAnim::Attack && run.loaded) {
+            run.Draw(center, tint, frame % run.frameCount, enemy.facingRight,
+                     net::kGoblinSpriteHeight);
+            return;
+        }
+
+        idle.Draw(center, tint, frame, enemy.facingRight, net::kGoblinSpriteHeight);
     }
 };
 
@@ -307,7 +338,7 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
             gStatusText = detail;
             break;
         case net::ClientConnectionState::Joined:
-            gStatusText = "Connected - click map to move";
+            gStatusText = "Connected - click map to move, click enemy to attack";
             gEditingName = false;
             gChatExpanded = false;
             gChatInput.clear();
@@ -339,6 +370,25 @@ static bool ConnectToServer() {
 #endif
 }
 
+static std::optional<int> TryPickEnemyAtWorld(Vector2 worldPos) {
+    const float pickRadius = net::kEntityPickRadius;
+    const float pickRadiusSq = pickRadius * pickRadius;
+
+    for (const net::EnemyState& enemy : gClient.GetEnemies()) {
+        if (enemy.state == net::EntityState::Dead) {
+            continue;
+        }
+
+        const float dx = worldPos.x - enemy.x;
+        const float dy = worldPos.y - enemy.y;
+        if (dx * dx + dy * dy <= pickRadiusSq) {
+            return enemy.id;
+        }
+    }
+
+    return std::nullopt;
+}
+
 static void HandleMapClick() {
     if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         return;
@@ -359,6 +409,16 @@ static void HandleMapClick() {
     }
 #endif
     if (IsMouseOverChatPanel(virtualPos)) {
+        return;
+    }
+
+    if (!CheckCollisionPointRec(virtualPos, GridScreenRect())) {
+        return;
+    }
+
+    const Vector2 worldPos = gWorldView.VirtualToWorld(virtualPos);
+    if (const std::optional<int> enemyId = TryPickEnemyAtWorld(worldPos)) {
+        gClient.SendAttackRequest(*enemyId);
         return;
     }
 
@@ -662,9 +722,27 @@ static void DrawOptionsPanel() {
 }
 #endif
 
+static void DrawEntityHpBar(Vector2 worldCenter, int hp, int maxHp, float spriteHeight) {
+    if (maxHp <= 0) {
+        return;
+    }
+
+    const float barWidth = 36.0f;
+    const float barHeight = 4.0f;
+    const float y = worldCenter.y - spriteHeight * 0.5f - 10.0f;
+    const float x = worldCenter.x - barWidth * 0.5f;
+    const float fillRatio = static_cast<float>(std::max(0, hp)) / static_cast<float>(maxHp);
+
+    DrawRectangle(x, y, barWidth, barHeight, Color{40, 40, 40, 200});
+    DrawRectangle(x, y, barWidth * fillRatio, barHeight, Color{220, 60, 60, 255});
+}
+
 static void DrawPlayerSprite(const net::PlayerState& player, Color color) {
     const Vector2 center = {player.x, player.y};
     gPlayerSprites.Draw(player, gClient.GetServerTick(), center, color);
+    if (player.state != net::EntityState::Dead) {
+        DrawEntityHpBar(center, player.hp, net::kPlayerMaxHp, kPlayerSpriteHeight);
+    }
 }
 
 static void DrawPlayerName(const net::PlayerState& player, float nameOffsetY) {
@@ -678,6 +756,9 @@ static void DrawPlayerName(const net::PlayerState& player, float nameOffsetY) {
 static void DrawEnemy(const net::EnemyState& enemy) {
     const Vector2 center = {enemy.x, enemy.y};
     gGoblinSprites.Draw(enemy, gClient.GetServerTick(), center);
+    if (enemy.state != net::EntityState::Dead) {
+        DrawEntityHpBar(center, enemy.hp, net::kGoblinMaxHp, net::kGoblinSpriteHeight);
+    }
 }
 
 static void DrawEnemies() {

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "common/config.hpp"
+#include "common/entity_state.hpp"
 
 namespace net {
 
@@ -19,22 +20,20 @@ struct EnemyState {
     std::string kind = "goblin";
     float x = 0.0f;
     float y = 0.0f;
+    EntityState state = EntityState::Idle;
+    uint32_t stateStartTick = 0;
     PlayerAnim anim = PlayerAnim::Idle;
     uint32_t animStartTick = 0;
     bool facingRight = true;
+    int hp = kGoblinMaxHp;
+    int targetId = -1;
+    uint32_t lastAttackTick = 0;
 };
 
 std::vector<EnemyState> CreateDefaultEnemies();
 
 inline int GoblinAnimFrameIndex(PlayerAnim anim, uint32_t serverTick, uint32_t animStartTick) {
-    (void)anim;
-    if (serverTick < animStartTick) {
-        return 0;
-    }
-
-    const uint32_t elapsed = serverTick - animStartTick;
-    return static_cast<int>((elapsed / static_cast<uint32_t>(kGoblinIdleAnimTicksPerFrame)) %
-                              static_cast<uint32_t>(kGoblinIdleFrameCount));
+    return AnimFrameIndex(anim, serverTick, animStartTick);
 }
 
 }  // namespace net

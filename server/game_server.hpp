@@ -29,6 +29,8 @@ struct ConnectedClient {
     int targetRow = 0;
     std::vector<std::pair<int, int>> movePath;
     size_t pathIndex = 0;
+    int pendingAttackEnemyId = -1;
+    uint32_t lastAttackTick = 0;
 };
 
 class GameServer {

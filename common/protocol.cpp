@@ -13,10 +13,16 @@ nlohmann::json PlayerStateToJson(const PlayerState& player) {
         {"name", player.name},
         {"x", player.x},
         {"y", player.y},
+        {"state", EntityStateName(player.state)},
+        {"state_start_tick", player.stateStartTick},
         {"anim", PlayerAnimName(player.anim)},
         {"anim_start_tick", player.animStartTick},
         {"facing_right", player.facingRight},
+        {"hp", player.hp},
     };
+    if (player.targetId >= 0) {
+        json["target_id"] = player.targetId;
+    }
     if (player.moveTargetCol >= 0 && player.moveTargetRow >= 0) {
         json["move_target_col"] = player.moveTargetCol;
         json["move_target_row"] = player.moveTargetRow;
@@ -30,24 +36,35 @@ PlayerState PlayerStateFromJson(const nlohmann::json& json) {
     player.name = json.at("name").get<std::string>();
     player.x = json.at("x").get<float>();
     player.y = json.at("y").get<float>();
+    player.state = ParseEntityState(json.value("state", "idle"));
+    player.stateStartTick = json.value("state_start_tick", 0u);
     player.anim = ParsePlayerAnim(json.value("anim", "idle"));
     player.animStartTick = json.value("anim_start_tick", 0u);
     player.facingRight = json.value("facing_right", true);
+    player.hp = json.value("hp", kPlayerMaxHp);
+    player.targetId = json.value("target_id", -1);
     player.moveTargetCol = json.value("move_target_col", -1);
     player.moveTargetRow = json.value("move_target_row", -1);
     return player;
 }
 
 nlohmann::json EnemyStateToJson(const EnemyState& enemy) {
-    return {
+    nlohmann::json json = {
         {"id", enemy.id},
         {"kind", enemy.kind},
         {"x", enemy.x},
         {"y", enemy.y},
+        {"state", EntityStateName(enemy.state)},
+        {"state_start_tick", enemy.stateStartTick},
         {"anim", PlayerAnimName(enemy.anim)},
         {"anim_start_tick", enemy.animStartTick},
         {"facing_right", enemy.facingRight},
+        {"hp", enemy.hp},
     };
+    if (enemy.targetId >= 0) {
+        json["target_id"] = enemy.targetId;
+    }
+    return json;
 }
 
 EnemyState EnemyStateFromJson(const nlohmann::json& json) {
@@ -56,9 +73,13 @@ EnemyState EnemyStateFromJson(const nlohmann::json& json) {
     enemy.kind = json.value("kind", "goblin");
     enemy.x = json.at("x").get<float>();
     enemy.y = json.at("y").get<float>();
+    enemy.state = ParseEntityState(json.value("state", "idle"));
+    enemy.stateStartTick = json.value("state_start_tick", 0u);
     enemy.anim = ParsePlayerAnim(json.value("anim", "idle"));
     enemy.animStartTick = json.value("anim_start_tick", 0u);
     enemy.facingRight = json.value("facing_right", true);
+    enemy.hp = json.value("hp", kGoblinMaxHp);
+    enemy.targetId = json.value("target_id", -1);
     return enemy;
 }
 
@@ -90,6 +111,7 @@ const char* MessageTypeName(MessageType type) {
         case MessageType::JoinAccepted: return "join_accepted";
         case MessageType::JoinRejected: return "join_rejected";
         case MessageType::MoveRequest: return "move_request";
+        case MessageType::AttackRequest: return "attack_request";
         case MessageType::WorldState: return "world_state";
         case MessageType::PlayerLeft: return "player_left";
         case MessageType::Ping: return "ping";
@@ -105,6 +127,7 @@ MessageType ParseMessageType(const std::string& value) {
     if (value == "join_accepted") return MessageType::JoinAccepted;
     if (value == "join_rejected") return MessageType::JoinRejected;
     if (value == "move_request") return MessageType::MoveRequest;
+    if (value == "attack_request") return MessageType::AttackRequest;
     if (value == "world_state") return MessageType::WorldState;
     if (value == "player_left") return MessageType::PlayerLeft;
     if (value == "ping") return MessageType::Ping;
@@ -143,6 +166,13 @@ Message MakeMoveRequest(int col, int row) {
     message.type = MessageType::MoveRequest;
     message.moveRequest.col = col;
     message.moveRequest.row = row;
+    return message;
+}
+
+Message MakeAttackRequest(int enemyId) {
+    Message message;
+    message.type = MessageType::AttackRequest;
+    message.attackRequest.enemyId = enemyId;
     return message;
 }
 
@@ -227,6 +257,9 @@ std::string SerializeMessage(const Message& message) {
             json["col"] = message.moveRequest.col;
             json["row"] = message.moveRequest.row;
             break;
+        case MessageType::AttackRequest:
+            json["enemy_id"] = message.attackRequest.enemyId;
+            break;
         case MessageType::WorldState:
             json["tick"] = message.worldState.tick;
             json["players"] = nlohmann::json::array();
@@ -290,6 +323,9 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
             case MessageType::MoveRequest:
                 message.moveRequest.col = json.at("col").get<int>();
                 message.moveRequest.row = json.at("row").get<int>();
+                break;
+            case MessageType::AttackRequest:
+                message.attackRequest.enemyId = json.at("enemy_id").get<int>();
                 break;
             case MessageType::WorldState:
                 message.worldState.tick = json.at("tick").get<uint32_t>();

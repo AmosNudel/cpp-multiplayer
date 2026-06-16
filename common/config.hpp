@@ -24,25 +24,38 @@ inline constexpr int kIdleFrameCount = 7;
 inline constexpr int kIdleAnimTicksPerFrame = 2;
 inline constexpr int kRunFrameCount = 8;
 inline constexpr int kRunAnimTicksPerFrame = 1;
+inline constexpr int kAttackFrameCount = 4;
+inline constexpr int kAttackAnimTicksPerFrame = 2;
+inline constexpr int kHitFrameCount = 4;
+inline constexpr int kHitAnimTicksPerFrame = 2;
+inline constexpr int kDeadFrameCount = 1;
+inline constexpr int kDeadAnimTicksPerFrame = 1;
 inline constexpr int kMaxChatLength = 120;
 
 enum class PlayerAnim {
     Idle,
     Run,
+    Attack,
+    Hit,
+    Dead,
 };
 
 inline const char* PlayerAnimName(PlayerAnim anim) {
     switch (anim) {
         case PlayerAnim::Idle: return "idle";
         case PlayerAnim::Run: return "run";
+        case PlayerAnim::Attack: return "attack";
+        case PlayerAnim::Hit: return "hit";
+        case PlayerAnim::Dead: return "dead";
     }
     return "idle";
 }
 
 inline PlayerAnim ParsePlayerAnim(const std::string& value) {
-    if (value == "run") {
-        return PlayerAnim::Run;
-    }
+    if (value == "run") return PlayerAnim::Run;
+    if (value == "attack") return PlayerAnim::Attack;
+    if (value == "hit") return PlayerAnim::Hit;
+    if (value == "dead") return PlayerAnim::Dead;
     return PlayerAnim::Idle;
 }
 
@@ -50,6 +63,9 @@ inline int AnimFrameCount(PlayerAnim anim) {
     switch (anim) {
         case PlayerAnim::Idle: return kIdleFrameCount;
         case PlayerAnim::Run: return kRunFrameCount;
+        case PlayerAnim::Attack: return kAttackFrameCount;
+        case PlayerAnim::Hit: return kHitFrameCount;
+        case PlayerAnim::Dead: return kDeadFrameCount;
     }
     return kIdleFrameCount;
 }
@@ -58,6 +74,9 @@ inline int AnimTicksPerFrame(PlayerAnim anim) {
     switch (anim) {
         case PlayerAnim::Idle: return kIdleAnimTicksPerFrame;
         case PlayerAnim::Run: return kRunAnimTicksPerFrame;
+        case PlayerAnim::Attack: return kAttackAnimTicksPerFrame;
+        case PlayerAnim::Hit: return kHitAnimTicksPerFrame;
+        case PlayerAnim::Dead: return kDeadAnimTicksPerFrame;
     }
     return kIdleAnimTicksPerFrame;
 }

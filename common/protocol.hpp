@@ -9,6 +9,7 @@
 
 #include "common/config.hpp"
 #include "common/enemies.hpp"
+#include "common/entity_state.hpp"
 
 namespace net {
 
@@ -17,6 +18,7 @@ enum class MessageType {
     JoinAccepted,
     JoinRejected,
     MoveRequest,
+    AttackRequest,
     WorldState,
     PlayerLeft,
     Ping,
@@ -30,14 +32,22 @@ struct MoveRequest {
     int row = 0;
 };
 
+struct AttackRequest {
+    int enemyId = 0;
+};
+
 struct PlayerState {
     int id = 0;
     std::string name;
     float x = 0.0f;
     float y = 0.0f;
+    EntityState state = EntityState::Idle;
+    uint32_t stateStartTick = 0;
     PlayerAnim anim = PlayerAnim::Idle;
     uint32_t animStartTick = 0;
     bool facingRight = true;
+    int hp = kPlayerMaxHp;
+    int targetId = -1;
     int moveTargetCol = -1;
     int moveTargetRow = -1;
 };
@@ -91,6 +101,7 @@ struct Message {
     JoinAccepted joinAccepted;
     JoinRejected joinRejected;
     MoveRequest moveRequest;
+    AttackRequest attackRequest;
     WorldState worldState;
     PlayerLeft playerLeft;
     PingMessage ping;
@@ -107,6 +118,7 @@ Message MakeJoinAccepted(int playerId, const std::vector<PlayerState>& players,
                          const std::vector<EnemyState>& enemies);
 Message MakeJoinRejected(const std::string& reason);
 Message MakeMoveRequest(int col, int row);
+Message MakeAttackRequest(int enemyId);
 Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players,
                        const std::vector<EnemyState>& enemies);
 Message MakePlayerLeft(int playerId);

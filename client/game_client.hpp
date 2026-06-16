@@ -29,6 +29,7 @@ public:
     void Disconnect();
     void Update();
     void SendMoveRequest(int col, int row);
+    void SendAttackRequest(int enemyId);
     void SendChat(const std::string& text);
 
     ClientConnectionState GetState() const { return state_; }
