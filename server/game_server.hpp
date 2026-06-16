@@ -53,6 +53,7 @@ private:
     void HandleDisconnect(int clientId, TransportKind transport);
     void SimulateTick();
     void BroadcastWorldState();
+    void BroadcastToAll(const Message& message);
     bool SendToClient(int clientId, TransportKind transport, const Message& message);
     std::vector<PlayerState> BuildPlayerSnapshot() const;
     uint32_t NowMs() const;

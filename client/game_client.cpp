@@ -61,6 +61,7 @@ void GameClient::Disconnect() {
     wsClient_.Disconnect();
     localPlayerId_ = 0;
     players_.clear();
+    chatLog_.clear();
     serverTick_ = 0;
     pingMs_ = 0;
     pendingDisconnect_ = false;
@@ -95,6 +96,7 @@ void GameClient::Update() {
         wsClient_.Disconnect();
         localPlayerId_ = 0;
         players_.clear();
+        chatLog_.clear();
         serverTick_ = 0;
         pingMs_ = 0;
 
@@ -136,6 +138,19 @@ void GameClient::SendInput(const PlayerInput& input) {
     }
 }
 
+void GameClient::SendChat(const std::string& text) {
+    if (state_ != ClientConnectionState::Joined || text.empty()) {
+        return;
+    }
+
+    const Message message = MakeChatSend(text);
+    if (useWebSocket_) {
+        wsClient_.Send(message);
+    } else {
+        tcpClient_.Send(message);
+    }
+}
+
 void GameClient::HandleMessage(const Message& message) {
     switch (message.type) {
         case MessageType::JoinAccepted:
@@ -163,6 +178,16 @@ void GameClient::HandleMessage(const Message& message) {
         case MessageType::Pong: {
             const uint32_t now = NowMs();
             pingMs_ = static_cast<int>(now - message.pong.clientTimeMs);
+            break;
+        }
+        case MessageType::Chat: {
+            if (message.chat.text.empty()) {
+                break;
+            }
+            chatLog_.push_back(message.chat);
+            if (chatLog_.size() > 8) {
+                chatLog_.erase(chatLog_.begin());
+            }
             break;
         }
         default:

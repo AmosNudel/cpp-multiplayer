@@ -1,6 +1,7 @@
 #include "game_server.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <iostream>
 #include <thread>
@@ -12,6 +13,30 @@ namespace {
 
 TransportKind TransportForClientId(int clientId) {
     return clientId >= 10000 ? TransportKind::WebSocket : TransportKind::Tcp;
+}
+
+std::string SanitizeChatText(const std::string& text) {
+    std::string trimmed;
+    trimmed.reserve(text.size());
+
+    size_t start = 0;
+    while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start]))) {
+        ++start;
+    }
+
+    size_t end = text.size();
+    while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1]))) {
+        --end;
+    }
+
+    for (size_t i = start; i < end && trimmed.size() < kMaxChatLength; ++i) {
+        const unsigned char ch = static_cast<unsigned char>(text[i]);
+        if (ch >= 32 && ch <= 126) {
+            trimmed.push_back(static_cast<char>(ch));
+        }
+    }
+
+    return trimmed;
 }
 
 }  // namespace
@@ -154,6 +179,23 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
                          MakePong(incoming.message.ping.clientTimeMs, NowMs()));
             break;
         }
+        case MessageType::Chat: {
+            auto it = clients_.find(incoming.clientId);
+            if (it == clients_.end() || !it->second.hasJoined) {
+                return;
+            }
+
+            const std::string text = SanitizeChatText(incoming.message.chat.text);
+            if (text.empty()) {
+                return;
+            }
+
+            const Message chat = MakeChatBroadcast(
+                incoming.clientId, it->second.name, text);
+            BroadcastToAll(chat);
+            std::cout << "[chat] " << it->second.name << ": " << text << "\n";
+            break;
+        }
         default:
             break;
     }
@@ -206,8 +248,10 @@ void GameServer::SimulateTick() {
 }
 
 void GameServer::BroadcastWorldState() {
-    const Message state = MakeWorldState(tick_, players_);
+    BroadcastToAll(MakeWorldState(tick_, players_));
+}
 
+void GameServer::BroadcastToAll(const Message& message) {
     std::vector<std::pair<int, TransportKind>> recipients;
     recipients.reserve(transportByClientId_.size());
     for (const auto& [clientId, transport] : transportByClientId_) {
@@ -218,7 +262,7 @@ void GameServer::BroadcastWorldState() {
         if (transportByClientId_.find(clientId) == transportByClientId_.end()) {
             continue;
         }
-        if (!SendToClient(clientId, transport, state)) {
+        if (!SendToClient(clientId, transport, message)) {
             EnqueueDisconnect(clientId, transport);
         }
     }

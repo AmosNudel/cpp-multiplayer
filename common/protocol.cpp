@@ -37,6 +37,7 @@ const char* MessageTypeName(MessageType type) {
         case MessageType::PlayerLeft: return "player_left";
         case MessageType::Ping: return "ping";
         case MessageType::Pong: return "pong";
+        case MessageType::Chat: return "chat";
     }
     return "unknown";
 }
@@ -50,6 +51,7 @@ MessageType ParseMessageType(const std::string& value) {
     if (value == "player_left") return MessageType::PlayerLeft;
     if (value == "ping") return MessageType::Ping;
     if (value == "pong") return MessageType::Pong;
+    if (value == "chat") return MessageType::Chat;
     return MessageType::JoinRequest;
 }
 
@@ -112,6 +114,22 @@ Message MakePong(uint32_t clientTimeMs, uint32_t serverTimeMs) {
     return message;
 }
 
+Message MakeChatSend(const std::string& text) {
+    Message message;
+    message.type = MessageType::Chat;
+    message.chat.text = text;
+    return message;
+}
+
+Message MakeChatBroadcast(int playerId, const std::string& name, const std::string& text) {
+    Message message;
+    message.type = MessageType::Chat;
+    message.chat.playerId = playerId;
+    message.chat.name = name;
+    message.chat.text = text;
+    return message;
+}
+
 std::string SerializeMessage(const Message& message) {
     nlohmann::json json;
     json["type"] = MessageTypeName(message.type);
@@ -152,6 +170,15 @@ std::string SerializeMessage(const Message& message) {
         case MessageType::Pong:
             json["client_time_ms"] = message.pong.clientTimeMs;
             json["server_time_ms"] = message.pong.serverTimeMs;
+            break;
+        case MessageType::Chat:
+            if (message.chat.playerId != 0) {
+                json["player_id"] = message.chat.playerId;
+            }
+            if (!message.chat.name.empty()) {
+                json["name"] = message.chat.name;
+            }
+            json["text"] = message.chat.text;
             break;
     }
 
@@ -198,6 +225,11 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
             case MessageType::Pong:
                 message.pong.clientTimeMs = json.at("client_time_ms").get<uint32_t>();
                 message.pong.serverTimeMs = json.at("server_time_ms").get<uint32_t>();
+                break;
+            case MessageType::Chat:
+                message.chat.playerId = json.value("player_id", 0);
+                message.chat.name = json.value("name", "");
+                message.chat.text = json.at("text").get<std::string>();
                 break;
         }
 

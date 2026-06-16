@@ -18,6 +18,7 @@ enum class MessageType {
     PlayerLeft,
     Ping,
     Pong,
+    Chat,
 };
 
 struct PlayerInput {
@@ -65,6 +66,12 @@ struct PongMessage {
     uint32_t serverTimeMs = 0;
 };
 
+struct ChatMessage {
+    int playerId = 0;
+    std::string name;
+    std::string text;
+};
+
 struct Message {
     MessageType type = MessageType::JoinRequest;
     JoinRequest joinRequest;
@@ -75,6 +82,7 @@ struct Message {
     PlayerLeft playerLeft;
     PingMessage ping;
     PongMessage pong;
+    ChatMessage chat;
 };
 
 const char* MessageTypeName(MessageType type);
@@ -88,6 +96,8 @@ Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players);
 Message MakePlayerLeft(int playerId);
 Message MakePing(uint32_t clientTimeMs);
 Message MakePong(uint32_t clientTimeMs, uint32_t serverTimeMs);
+Message MakeChatSend(const std::string& text);
+Message MakeChatBroadcast(int playerId, const std::string& name, const std::string& text);
 
 std::string SerializeMessage(const Message& message);
 std::optional<Message> DeserializeMessage(const std::string& json);

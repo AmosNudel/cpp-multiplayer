@@ -17,7 +17,9 @@ static const int screenHeight = 640;
 static net::GameClient gClient;
 static std::string gStatusText = "Press ENTER to connect";
 static std::string gPlayerName = "Player";
+static std::string gChatInput;
 static bool gEditingName = true;
+static bool gChatOpen = false;
 static Color gLocalColor = RAYWHITE;
 
 static Color ColorForPlayer(int playerId) {
@@ -39,18 +41,24 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
         case net::ClientConnectionState::Disconnected:
             gStatusText = detail.empty() ? "Disconnected" : detail;
             gEditingName = true;
+            gChatOpen = false;
+            gChatInput.clear();
             break;
         case net::ClientConnectionState::Connecting:
             gStatusText = detail;
             break;
         case net::ClientConnectionState::Joined:
-            gStatusText = "Connected - WASD to move";
+            gStatusText = "Connected - WASD to move, T to chat";
             gEditingName = false;
+            gChatOpen = false;
+            gChatInput.clear();
             gLocalColor = ColorForPlayer(gClient.GetLocalPlayerId());
             break;
         case net::ClientConnectionState::Rejected:
             gStatusText = "Rejected: " + detail;
             gEditingName = true;
+            gChatOpen = false;
+            gChatInput.clear();
             break;
     }
 }
@@ -64,6 +72,32 @@ static bool ConnectToServer() {
     return gClient.ConnectDesktop(endpoint.host, endpoint.port, gPlayerName,
                                   OnConnectionState);
 #endif
+}
+
+static void HandleChatInput() {
+    int key = GetCharPressed();
+    while (key > 0) {
+        if (key >= 32 && key <= 125 &&
+            gChatInput.size() < net::kMaxChatLength) {
+            gChatInput.push_back(static_cast<char>(key));
+        }
+        key = GetCharPressed();
+    }
+
+    if (IsKeyPressed(KEY_BACKSPACE) && !gChatInput.empty()) {
+        gChatInput.pop_back();
+    }
+
+    if (IsKeyPressed(KEY_ENTER) && !gChatInput.empty()) {
+        gClient.SendChat(gChatInput);
+        gChatInput.clear();
+        gChatOpen = false;
+    }
+
+    if (IsKeyPressed(KEY_ESCAPE)) {
+        gChatInput.clear();
+        gChatOpen = false;
+    }
 }
 
 static void UpdateGame() {
@@ -88,6 +122,16 @@ static void UpdateGame() {
         return;
     }
 
+    if (IsKeyPressed(KEY_T) && !gChatOpen) {
+        gChatOpen = true;
+        return;
+    }
+
+    if (gChatOpen) {
+        HandleChatInput();
+        return;
+    }
+
     if (IsKeyPressed(KEY_ESCAPE)) {
         gClient.Disconnect();
         return;
@@ -99,6 +143,35 @@ static void UpdateGame() {
     input.left = IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT);
     input.right = IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT);
     gClient.SendInput(input);
+}
+
+static void DrawChatPanel() {
+    const int panelX = 20;
+    const int panelY = screenHeight - 190;
+    const int panelW = 420;
+    const int panelH = 170;
+
+    DrawRectangle(panelX, panelY, panelW, panelH, Color{18, 20, 26, 220});
+    DrawRectangleLines(panelX, panelY, panelW, panelH, Color{70, 76, 92, 255});
+    DrawText("Chat", panelX + 10, panelY + 8, 18, RAYWHITE);
+
+    int lineY = panelY + 34;
+    for (const net::ChatMessage& line : gClient.GetChatLog()) {
+        const std::string formatted = line.name + ": " + line.text;
+        DrawText(formatted.c_str(), panelX + 10, lineY, 16, LIGHTGRAY);
+        lineY += 18;
+    }
+
+    if (gChatOpen) {
+        const int inputY = panelY + panelH - 34;
+        DrawRectangle(panelX + 8, inputY, panelW - 16, 26, Color{30, 34, 42, 255});
+        DrawText("> ", panelX + 14, inputY + 5, 16, YELLOW);
+        DrawText(gChatInput.c_str(), panelX + 34, inputY + 5, 16, YELLOW);
+        DrawText("_", panelX + 34 + MeasureText(gChatInput.c_str(), 16), inputY + 5, 16, YELLOW);
+        DrawText("ENTER = send   ESC = close chat", panelX + 10, panelY + panelH - 56, 14, GRAY);
+    } else {
+        DrawText("T = open chat", panelX + 10, panelY + panelH - 28, 14, GRAY);
+    }
 }
 
 static void DrawGame() {
@@ -137,6 +210,7 @@ static void DrawGame() {
         DrawText(TextFormat("Tick: %u", gClient.GetServerTick()), 20, 100, 18, GRAY);
         DrawText(TextFormat("Ping: %d ms", gClient.GetPingMs()), 20, 124, 18, GRAY);
         DrawText("ESC = disconnect", 20, 148, 16, GRAY);
+        DrawChatPanel();
     }
 
     EndDrawing();
