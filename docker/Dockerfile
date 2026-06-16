@@ -11,9 +11,10 @@ WORKDIR /app
 COPY . .
 
 RUN cmake -S . -B build \
+    -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_SERVER=ON \
     -DBUILD_CLIENT=OFF \
-    && cmake --build build --config Release
+    && cmake --build build
 
 FROM ubuntu:24.04 AS runtime
 

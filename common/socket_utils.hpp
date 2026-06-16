@@ -25,6 +25,7 @@ inline int CloseSocket(SocketHandle socket) { return closesocket(socket); }
 inline int LastSocketError() { return WSAGetLastError(); }
 #else
 #include <arpa/inet.h>
+#include <cerrno>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
