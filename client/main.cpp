@@ -6,6 +6,7 @@
 #include "client/connection_config.hpp"
 #include "client/game_client.hpp"
 #include "client/viewport.hpp"
+#include "client/world_view.hpp"
 #include "common/config.hpp"
 #include "common/enemies.hpp"
 #include "common/grid.hpp"
@@ -21,11 +22,7 @@ static const char* kRunSpritePath =
     "assets/player_sprites/Sprites/with_outline/RUN.png";
 static const char* kGoblinIdleSpritePath = "assets/enemy/Goblin/Idle.png";
 static const float kPlayerSpriteHeight = 96.0f;
-static constexpr int kSidePadding = 80;
-static constexpr float kWorldScreenOriginX = static_cast<float>(kSidePadding);
-static constexpr float kWorldScreenOriginY = static_cast<float>(GameViewport::kHudHeight);
-static constexpr float kGridScreenBottom =
-    kWorldScreenOriginY + net::kWorldHeight;
+static constexpr float kGridScreenBottom = WorldView::kGridVirtualY + net::kWorldHeight;
 
 static std::string ResolveAssetPath(const char* relativePath) {
     const std::string relative = relativePath;
@@ -159,6 +156,7 @@ struct GoblinSprites {
 
 static net::GameClient gClient;
 static GameViewport gViewport;
+static WorldView gWorldView;
 static PlayerSprites gPlayerSprites;
 static GoblinSprites gGoblinSprites;
 static std::string gStatusText = "Press ENTER to connect";
@@ -193,12 +191,32 @@ static Rectangle ChatPanelRect() {
 }
 
 static Rectangle GridScreenRect() {
+    return gWorldView.GridVirtualRect();
+}
+
+static Rectangle CellWorldRect(int col, int row) {
     return {
-        kWorldScreenOriginX,
-        kWorldScreenOriginY,
-        net::kWorldWidth,
-        net::kWorldHeight,
+        static_cast<float>(col) * net::kGridCellSize,
+        static_cast<float>(row) * net::kGridCellSize,
+        net::kGridCellSize,
+        net::kGridCellSize,
     };
+}
+
+static bool TryGetWorldCellFromVirtual(Vector2 virtualPos, int& col, int& row) {
+    if (!CheckCollisionPointRec(virtualPos, GridScreenRect())) {
+        return false;
+    }
+
+    const Vector2 world = gWorldView.VirtualToWorld(virtualPos);
+    if (world.x < 0.0f || world.y < 0.0f || world.x >= net::kWorldWidth ||
+        world.y >= net::kWorldHeight) {
+        return false;
+    }
+
+    col = net::WorldToCellCol(world.x);
+    row = net::WorldToCellRow(world.y);
+    return net::IsValidCell(col, row);
 }
 
 static void DrawUiChrome() {
@@ -321,28 +339,6 @@ static bool ConnectToServer() {
 #endif
 }
 
-static Rectangle CellScreenRect(int col, int row) {
-    return {
-        kWorldScreenOriginX + static_cast<float>(col) * net::kGridCellSize,
-        kWorldScreenOriginY + static_cast<float>(row) * net::kGridCellSize,
-        net::kGridCellSize,
-        net::kGridCellSize,
-    };
-}
-
-static bool TryGetWorldCellFromVirtual(Vector2 virtualPos, int& col, int& row) {
-    if (!CheckCollisionPointRec(virtualPos, GridScreenRect())) {
-        return false;
-    }
-
-    const float worldX = virtualPos.x - kWorldScreenOriginX;
-    const float worldY = virtualPos.y - kWorldScreenOriginY;
-
-    col = net::WorldToCellCol(worldX);
-    row = net::WorldToCellRow(worldY);
-    return net::IsValidCell(col, row);
-}
-
 static void HandleMapClick() {
     if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         return;
@@ -443,26 +439,24 @@ static void DrawGridTiles() {
             }
 
             const Color color = tile == net::TileType::Wall ? wallColor : propColor;
-            DrawRectangleRec(CellScreenRect(col, row), color);
+            DrawRectangleRec(CellWorldRect(col, row), color);
         }
     }
 }
 
 static void DrawGrid() {
-    const int originX = static_cast<int>(kWorldScreenOriginX);
-    const int originY = static_cast<int>(kWorldScreenOriginY);
     const int worldW = static_cast<int>(net::kWorldWidth);
     const int worldH = static_cast<int>(net::kWorldHeight);
     const Color gridColor = Color{52, 58, 72, 255};
 
     for (int col = 0; col <= net::kGridCols; ++col) {
-        const int x = originX + col * static_cast<int>(net::kGridCellSize);
-        DrawLine(x, originY, x, originY + worldH, gridColor);
+        const int x = col * static_cast<int>(net::kGridCellSize);
+        DrawLine(x, 0, x, worldH, gridColor);
     }
 
     for (int row = 0; row <= net::kGridRows; ++row) {
-        const int y = originY + row * static_cast<int>(net::kGridCellSize);
-        DrawLine(originX, y, originX + worldW, y, gridColor);
+        const int y = row * static_cast<int>(net::kGridCellSize);
+        DrawLine(0, y, worldW, y, gridColor);
     }
 }
 
@@ -490,7 +484,7 @@ static void DrawGridHighlights() {
         const Color hoverColor = map.IsWalkable(hoverCol, hoverRow)
                                      ? Color{90, 100, 130, 60}
                                      : Color{180, 80, 80, 50};
-        DrawRectangleRec(CellScreenRect(hoverCol, hoverRow), hoverColor);
+        DrawRectangleRec(CellWorldRect(hoverCol, hoverRow), hoverColor);
     }
 
     for (const net::PlayerState& player : gClient.GetPlayers()) {
@@ -501,7 +495,7 @@ static void DrawGridHighlights() {
         const bool isLocal = player.id == gClient.GetLocalPlayerId();
         const Color tint = isLocal ? Color{120, 180, 255, 80}
                                    : Color{180, 180, 180, 50};
-        DrawRectangleRec(CellScreenRect(player.moveTargetCol, player.moveTargetRow), tint);
+        DrawRectangleRec(CellWorldRect(player.moveTargetCol, player.moveTargetRow), tint);
     }
 }
 
@@ -528,6 +522,18 @@ static void HandleChatInput() {
 static void UpdateGame() {
     gViewport.UpdateLayout();
     gClient.Update();
+
+    const Vector2 virtualMouse = GetVirtualMousePosition();
+    const bool allowZoom = !gEditingName && !gChatExpanded
+#if !defined(PLATFORM_WEB)
+                           && !gOptionsOpen
+#endif
+        ;
+    gWorldView.UpdateInput(virtualMouse, allowZoom);
+
+    if (IsKeyPressed(KEY_R) && allowZoom) {
+        gWorldView.Reset();
+    }
 
     if (IsKeyPressed(KEY_F11)) {
         ToggleFullscreen();
@@ -653,25 +659,21 @@ static void DrawOptionsPanel() {
 }
 #endif
 
-static void DrawPlayer(const net::PlayerState& player, Color color, float nameOffsetY) {
-    const Vector2 center = {
-        kWorldScreenOriginX + player.x,
-        kWorldScreenOriginY + player.y,
-    };
-
+static void DrawPlayerSprite(const net::PlayerState& player, Color color) {
+    const Vector2 center = {player.x, player.y};
     gPlayerSprites.Draw(player, gClient.GetServerTick(), center, color);
+}
+
+static void DrawPlayerName(const net::PlayerState& player, float nameOffsetY) {
+    const Vector2 virtualCenter = gWorldView.WorldToVirtual({player.x, player.y});
     DrawText(player.name.c_str(),
-             static_cast<int>(center.x - 24.0f),
-             static_cast<int>(center.y - nameOffsetY),
+             static_cast<int>(virtualCenter.x - 24.0f),
+             static_cast<int>(virtualCenter.y - nameOffsetY),
              16, RAYWHITE);
 }
 
 static void DrawEnemy(const net::EnemyState& enemy) {
-    const Vector2 center = {
-        kWorldScreenOriginX + enemy.x,
-        kWorldScreenOriginY + enemy.y,
-    };
-
+    const Vector2 center = {enemy.x, enemy.y};
     gGoblinSprites.Draw(enemy, gClient.GetServerTick(), center);
 }
 
@@ -688,36 +690,47 @@ static void DrawGame() {
 
     DrawUiChrome();
 
-    DrawRectangle(static_cast<int>(kWorldScreenOriginX),
-                  static_cast<int>(kWorldScreenOriginY),
-                  static_cast<int>(net::kWorldWidth), static_cast<int>(net::kWorldHeight),
-                  Color{36, 40, 50, 255});
+    const Rectangle gridRect = gWorldView.GridVirtualRect();
+    BeginScissorMode(static_cast<int>(gridRect.x), static_cast<int>(gridRect.y),
+                     static_cast<int>(gridRect.width), static_cast<int>(gridRect.height));
+
+    const Camera2D worldCamera = gWorldView.BuildCamera();
+    BeginMode2D(worldCamera);
+
+    DrawRectangle(0, 0, static_cast<int>(net::kWorldWidth),
+                  static_cast<int>(net::kWorldHeight), Color{36, 40, 50, 255});
     DrawGridTiles();
     DrawGrid();
-    DrawRectangleLines(static_cast<int>(kWorldScreenOriginX),
-                       static_cast<int>(kWorldScreenOriginY),
-                       static_cast<int>(net::kWorldWidth),
+    DrawRectangleLines(0, 0, static_cast<int>(net::kWorldWidth),
                        static_cast<int>(net::kWorldHeight), Color{70, 76, 92, 255});
     DrawGridHighlights();
     DrawEnemies();
 
-    const float nameOffsetY = gPlayerSprites.AnyLoaded()
-                                  ? kPlayerSpriteHeight * 0.5f + 8.0f
-                                  : net::kPlayerRadius + 22.0f;
     const int localPlayerId = gClient.GetLocalPlayerId();
 
     for (const net::PlayerState& player : gClient.GetPlayers()) {
         if (player.id == localPlayerId) {
             continue;
         }
-        DrawPlayer(player, ColorForPlayer(player.id), nameOffsetY);
+        DrawPlayerSprite(player, ColorForPlayer(player.id));
     }
 
     for (const net::PlayerState& player : gClient.GetPlayers()) {
         if (player.id != localPlayerId) {
             continue;
         }
-        DrawPlayer(player, gLocalColor, nameOffsetY);
+        DrawPlayerSprite(player, gLocalColor);
+    }
+
+    EndMode2D();
+    EndScissorMode();
+
+    const float nameOffsetY = gPlayerSprites.AnyLoaded()
+                                  ? kPlayerSpriteHeight * 0.5f + 8.0f
+                                  : net::kPlayerRadius + 22.0f;
+
+    for (const net::PlayerState& player : gClient.GetPlayers()) {
+        DrawPlayerName(player, nameOffsetY);
     }
 
     DrawText("Multiplayer Template", 20, 20, 24, RAYWHITE);
@@ -734,10 +747,12 @@ static void DrawGame() {
     } else {
         DrawText(TextFormat("Tick: %u", gClient.GetServerTick()), 20, 100, 18, GRAY);
         DrawText(TextFormat("Ping: %d ms", gClient.GetPingMs()), 20, 124, 18, GRAY);
+        DrawText(TextFormat("Zoom: %.0f%%   Scroll = zoom   R = reset", gWorldView.Zoom() * 100.0f),
+                 20, 148, 16, GRAY);
 #if !defined(PLATFORM_WEB)
-        DrawText("F11 = fullscreen   ESC = options", 20, 148, 16, GRAY);
+        DrawText("F11 = fullscreen   ESC = options", 20, 172, 16, GRAY);
 #else
-        DrawText("F11 = fullscreen", 20, 148, 16, GRAY);
+        DrawText("F11 = fullscreen", 20, 172, 16, GRAY);
 #endif
         DrawChatPanel();
     }

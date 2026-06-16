@@ -54,6 +54,7 @@ if(BUILD_CLIENT)
     add_executable(game_client
         client/main.cpp
         client/viewport.cpp
+        client/world_view.cpp
         client/connection_config.cpp
         client/game_client.cpp
         client/tcp_client.cpp
