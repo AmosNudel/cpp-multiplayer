@@ -257,23 +257,6 @@ void CancelPlayerCombat(PlayerState& player, ConnectedClient& client,
     EndPlayerCombat(player, enemies, tick);
 }
 
-void ApplyDamageToEnemy(EnemyState& enemy, int damage, uint32_t tick) {
-    if (!IsAlive(enemy.state)) {
-        return;
-    }
-
-    enemy.hp -= damage;
-    if (enemy.hp <= 0) {
-        enemy.hp = 0;
-        TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
-                         EntityState::Dead, tick);
-        return;
-    }
-
-    TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
-                     EntityState::Hit, tick);
-}
-
 void TryApplyComboSwingDamage(PlayerState& player, ConnectedClient& client, EnemyState& enemy,
                               uint32_t tick) {
     if (!IsComboAttackPhase(client.comboPhase) || client.comboSwingDamageDealt) {
@@ -293,7 +276,10 @@ void TryApplyComboSwingDamage(PlayerState& player, ConnectedClient& client, Enem
     }
 
     client.comboSwingDamageDealt = true;
-    ApplyDamageToEnemy(enemy, kPlayerAttackDamage, tick);
+    const bool critical =
+        RollCriticalHit(player.id, enemy.id, tick, kPlayerCritChancePercent);
+    const int damage = PlayerAttackDamage(critical);
+    ApplyDamageToEnemy(enemy, damage, tick, critical);
     if (!IsAlive(enemy.state)) {
         player.targetId = -1;
         ResetPlayerCombo(client);
@@ -387,7 +373,7 @@ void UpdateGoblinCombat(EnemyState& enemy, std::vector<PlayerState>& players, ui
             if (frame == kGoblinAttackDamageFrame) {
                 enemy.attackDamageDealt = true;
                 if (PlayerState* mutablePlayer = FindPlayer(players, enemy.targetId)) {
-                    ApplyDamageToPlayer(*mutablePlayer, kGoblinAttackDamage, tick);
+                    ApplyDamageToPlayer(*mutablePlayer, kGoblinAttackDamage, tick, false);
                 }
             }
         }

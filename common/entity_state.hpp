@@ -19,6 +19,8 @@ inline constexpr int kPlayerMaxHp = 100;
 inline constexpr int kPlayerMaxShield = 50;
 inline constexpr int kGoblinMaxHp = 150;
 inline constexpr int kPlayerAttackDamage = 10;
+inline constexpr int kPlayerCritChancePercent = 25;
+inline constexpr int kPlayerCritDamageMultiplier = 2;
 inline constexpr int kGoblinAttackDamage = 8;
 inline constexpr int kHitStunTicks = 8;
 inline constexpr int kGoblinAttackCooldownTicks = 12;
@@ -52,6 +54,10 @@ inline PlayerAnim AnimForEntityState(EntityState state) {
         case EntityState::Idle:
         default: return PlayerAnim::Idle;
     }
+}
+
+inline int PlayerAttackDamage(bool critical) {
+    return critical ? kPlayerAttackDamage * kPlayerCritDamageMultiplier : kPlayerAttackDamage;
 }
 
 inline bool IsAlive(EntityState state) { return state != EntityState::Dead; }

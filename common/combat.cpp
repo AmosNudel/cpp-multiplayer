@@ -123,7 +123,20 @@ bool IsAnimFinished(PlayerAnim anim, uint32_t tick, uint32_t animStartTick) {
     return elapsed >= static_cast<uint32_t>(frameCount * ticksPerFrame);
 }
 
-bool ApplyDamageToPlayer(PlayerState& player, int damage, uint32_t tick) {
+bool RollCriticalHit(int attackerId, int targetId, uint32_t tick, int chancePercent) {
+    if (chancePercent <= 0) {
+        return false;
+    }
+    if (chancePercent >= 100) {
+        return true;
+    }
+
+    const uint32_t roll = static_cast<uint32_t>(attackerId) * 73856093u ^
+                          static_cast<uint32_t>(targetId) * 19349663u ^ tick * 83492791u;
+    return static_cast<int>(roll % 100) < chancePercent;
+}
+
+bool ApplyDamageToPlayer(PlayerState& player, int damage, uint32_t tick, bool critical) {
     if (!IsAlive(player.state) || damage <= 0) {
         return false;
     }
@@ -146,9 +159,35 @@ bool ApplyDamageToPlayer(PlayerState& player, int damage, uint32_t tick) {
         return true;
     }
 
-    TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
-                     EntityState::Hit, tick);
-    return true;
+    if (critical) {
+        TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
+                         EntityState::Hit, tick);
+        return true;
+    }
+
+    return false;
+}
+
+bool ApplyDamageToEnemy(EnemyState& enemy, int damage, uint32_t tick, bool critical) {
+    if (!IsAlive(enemy.state) || damage <= 0) {
+        return false;
+    }
+
+    enemy.hp -= damage;
+    if (enemy.hp <= 0) {
+        enemy.hp = 0;
+        TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
+                         EntityState::Dead, tick);
+        return true;
+    }
+
+    if (critical) {
+        TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
+                         EntityState::Hit, tick);
+        return true;
+    }
+
+    return false;
 }
 
 }  // namespace net
