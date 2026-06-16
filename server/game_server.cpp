@@ -42,6 +42,19 @@ std::string SanitizeChatText(const std::string& text) {
     return trimmed;
 }
 
+void UpdateFacingFromDirection(PlayerState& player, float dx, float dy) {
+    (void)dy;
+    if (dx > 0.01f) {
+        player.facingRight = true;
+    } else if (dx < -0.01f) {
+        player.facingRight = false;
+    }
+}
+
+void SetMoveFacingToward(PlayerState& player, float targetX, float targetY) {
+    UpdateFacingFromDirection(player, targetX - player.x, targetY - player.y);
+}
+
 }  // namespace
 
 bool GameServer::Start(uint16_t tcpPort, uint16_t wsPort) {
@@ -249,6 +262,12 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             client.targetRow = row;
             player->moveTargetCol = col;
             player->moveTargetRow = row;
+
+            const auto& firstWaypoint = client.movePath[client.pathIndex];
+            SetMoveFacingToward(*player, CellCenterX(firstWaypoint.first),
+                                CellCenterY(firstWaypoint.second));
+            player->anim = PlayerAnim::Run;
+            player->animStartTick = tick_;
             break;
         }
         case MessageType::Ping: {
@@ -308,38 +327,51 @@ void GameServer::SimulateTick() {
         bool moving = false;
 
         if (client.hasMoveTarget && client.pathIndex < client.movePath.size()) {
-            const auto& waypoint = client.movePath[client.pathIndex];
-            const float targetX = CellCenterX(waypoint.first);
-            const float targetY = CellCenterY(waypoint.second);
-            float dx = targetX - player.x;
-            float dy = targetY - player.y;
-            const float dist = std::sqrt(dx * dx + dy * dy);
-            const float step = kPlayerSpeed * kTickDuration;
-            const float arriveDist = step * 0.5f;
+            moving = true;
+            float remainingStep = kPlayerSpeed * kTickDuration;
+            static constexpr float kArriveEpsilon = 0.5f;
 
-            if (dist <= arriveDist) {
-                player.x = targetX;
-                player.y = targetY;
-                ++client.pathIndex;
-                if (client.pathIndex >= client.movePath.size()) {
-                    client.hasMoveTarget = false;
-                    client.movePath.clear();
-                    player.moveTargetCol = -1;
-                    player.moveTargetRow = -1;
+            while (remainingStep > 0.0f && client.pathIndex < client.movePath.size()) {
+                const auto& waypoint = client.movePath[client.pathIndex];
+                const float targetX = CellCenterX(waypoint.first);
+                const float targetY = CellCenterY(waypoint.second);
+                float dx = targetX - player.x;
+                float dy = targetY - player.y;
+                const float dist = std::sqrt(dx * dx + dy * dy);
+
+                if (dist <= kArriveEpsilon) {
+                    player.x = targetX;
+                    player.y = targetY;
+                    ++client.pathIndex;
+                    if (client.pathIndex >= client.movePath.size()) {
+                        client.hasMoveTarget = false;
+                        client.movePath.clear();
+                        player.moveTargetCol = -1;
+                        player.moveTargetRow = -1;
+                    }
+                    continue;
                 }
-            } else {
+
                 dx /= dist;
                 dy /= dist;
+                UpdateFacingFromDirection(player, dx, dy);
 
-                if (dx > 0.01f) {
-                    player.facingRight = true;
-                } else if (dx < -0.01f) {
-                    player.facingRight = false;
+                if (dist <= remainingStep) {
+                    player.x = targetX;
+                    player.y = targetY;
+                    remainingStep -= dist;
+                    ++client.pathIndex;
+                    if (client.pathIndex >= client.movePath.size()) {
+                        client.hasMoveTarget = false;
+                        client.movePath.clear();
+                        player.moveTargetCol = -1;
+                        player.moveTargetRow = -1;
+                    }
+                } else {
+                    player.x += dx * remainingStep;
+                    player.y += dy * remainingStep;
+                    remainingStep = 0.0f;
                 }
-
-                player.x += dx * step;
-                player.y += dy * step;
-                moving = true;
             }
         }
 
