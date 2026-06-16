@@ -37,6 +37,33 @@ std::vector<GridPoint> ReconstructPath(const std::vector<int>& parent, int goalI
     return path;
 }
 
+std::vector<GridPoint> SimplifyPathToCorners(const std::vector<GridPoint>& path) {
+    if (path.size() <= 2) {
+        return path;
+    }
+
+    std::vector<GridPoint> simplified;
+    simplified.push_back(path.front());
+
+    for (size_t i = 2; i < path.size(); ++i) {
+        const GridPoint& beforePrev = path[i - 2];
+        const GridPoint& prev = path[i - 1];
+        const GridPoint& curr = path[i];
+
+        const int prevDx = prev.first - beforePrev.first;
+        const int prevDy = prev.second - beforePrev.second;
+        const int currDx = curr.first - prev.first;
+        const int currDy = curr.second - prev.second;
+
+        if (prevDx != currDx || prevDy != currDy) {
+            simplified.push_back(prev);
+        }
+    }
+
+    simplified.push_back(path.back());
+    return simplified;
+}
+
 }  // namespace
 
 std::vector<GridPoint> FindPath(const GridMap& map, int startCol, int startRow, int goalCol,
@@ -83,7 +110,7 @@ std::vector<GridPoint> FindPath(const GridMap& map, int startCol, int startRow, 
         closed[static_cast<size_t>(currentIndex)] = true;
 
         if (currentIndex == goalIndex) {
-            return ReconstructPath(parent, goalIndex);
+            return SimplifyPathToCorners(ReconstructPath(parent, goalIndex));
         }
 
         for (const auto& direction : kDirections) {
