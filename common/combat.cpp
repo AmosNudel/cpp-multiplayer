@@ -24,6 +24,40 @@ void SnapEntityToCellCenter(float& x, float& y) {
     y = CellCenterY(WorldToCellRow(y));
 }
 
+bool IsCellOccupied(int col, int row, const std::vector<PlayerState>& players,
+                    const std::vector<EnemyState>& enemies, int ignorePlayerId,
+                    int ignoreEnemyId) {
+    for (const PlayerState& player : players) {
+        if (player.id == ignorePlayerId || !IsAlive(player.state)) {
+            continue;
+        }
+        if (WorldToCellCol(player.x) == col && WorldToCellRow(player.y) == row) {
+            return true;
+        }
+    }
+
+    for (const EnemyState& enemy : enemies) {
+        if (enemy.id == ignoreEnemyId || !IsAlive(enemy.state)) {
+            continue;
+        }
+        if (WorldToCellCol(enemy.x) == col && WorldToCellRow(enemy.y) == row) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+std::optional<GridPoint> FindRetreatTile(const GridMap& map, int playerCol, int playerRow,
+                                         int enemyCol, int enemyRow) {
+    const int retreatCol = playerCol + (playerCol - enemyCol);
+    const int retreatRow = playerRow + (playerRow - enemyRow);
+    if (!IsValidCell(retreatCol, retreatRow) || !map.IsWalkable(retreatCol, retreatRow)) {
+        return std::nullopt;
+    }
+    return GridPoint{retreatCol, retreatRow};
+}
+
 std::optional<GridPoint> FindBestAdjacentApproachTile(const GridMap& map, int startCol,
                                                       int startRow, int targetCol,
                                                       int targetRow) {

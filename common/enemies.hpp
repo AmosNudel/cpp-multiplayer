@@ -52,6 +52,7 @@ std::vector<std::pair<int, int>> CollectGoblinSpawnPoints(
 std::pair<int, int> PickRandomGoblinSpawnCell(const GridMap& map,
                                                const std::vector<EnemyState>& enemies,
                                                int excludeEnemyId = -1);
+bool EnemiesShareTiles(const std::vector<EnemyState>& enemies);
 std::vector<EnemyState> CreateDefaultEnemies();
 EnemyState CreateGoblinAt(int id, int col, int row);
 

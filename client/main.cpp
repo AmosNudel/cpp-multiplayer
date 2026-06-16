@@ -311,6 +311,39 @@ static Rectangle RespawnGoblinButtonRect() {
     };
 }
 
+static Rectangle ActionsPanelRect() {
+    return {
+        20.0f,
+        kGridScreenBottom + 16.0f,
+        static_cast<float>(GameViewport::kVirtualWidth - 40),
+        static_cast<float>(GameViewport::kBottomBarHeight - 32),
+    };
+}
+
+static Rectangle DisengageButtonRect() {
+    const Rectangle panel = ActionsPanelRect();
+    return {
+        panel.x,
+        panel.y + 28.0f,
+        120.0f,
+        36.0f,
+    };
+}
+
+static bool IsLocalPlayerInCombat() {
+    if (gClient.GetState() != net::ClientConnectionState::Joined) {
+        return false;
+    }
+
+    const int localPlayerId = gClient.GetLocalPlayerId();
+    for (const net::PlayerState& player : gClient.GetPlayers()) {
+        if (player.id == localPlayerId) {
+            return player.state == net::EntityState::Combat && player.targetId >= 0;
+        }
+    }
+    return false;
+}
+
 static bool IsMouseOverChatPanel(Vector2 virtualPos) {
     if (gEditingName) {
         return false;
@@ -318,21 +351,31 @@ static bool IsMouseOverChatPanel(Vector2 virtualPos) {
     return CheckCollisionPointRec(virtualPos, ChatPanelRect());
 }
 
-static void DrawUiButton(const char* label, Rectangle bounds) {
+static bool IsMouseOverActionsPanel(Vector2 virtualPos) {
+    if (gEditingName) {
+        return false;
+    }
+    return CheckCollisionPointRec(virtualPos, ActionsPanelRect());
+}
+
+static void DrawUiButton(const char* label, Rectangle bounds, bool enabled = true) {
     const Vector2 mouse = GetVirtualMousePosition();
-    const bool hover = CheckCollisionPointRec(mouse, bounds);
-    DrawRectangleRec(bounds, hover ? Color{54, 58, 70, 255} : Color{38, 42, 52, 255});
-    DrawRectangleLinesEx(bounds, 1.0f, Color{82, 88, 104, 255});
+    const bool hover = enabled && CheckCollisionPointRec(mouse, bounds);
+    DrawRectangleRec(bounds,
+                     enabled ? (hover ? Color{54, 58, 70, 255} : Color{38, 42, 52, 255})
+                             : Color{32, 34, 40, 255});
+    DrawRectangleLinesEx(bounds, 1.0f,
+                         enabled ? Color{82, 88, 104, 255} : Color{58, 62, 72, 255});
     const int fontSize = 16;
     const int textW = MeasureText(label, fontSize);
     DrawText(label,
              static_cast<int>(bounds.x + (bounds.width - textW) * 0.5f),
              static_cast<int>(bounds.y + (bounds.height - fontSize) * 0.5f),
-             fontSize, RAYWHITE);
+             fontSize, enabled ? RAYWHITE : Color{120, 124, 132, 255});
 }
 
-static bool WasUiButtonPressed(Rectangle bounds) {
-    return CheckCollisionPointRec(GetVirtualMousePosition(), bounds) &&
+static bool WasUiButtonPressed(Rectangle bounds, bool enabled = true) {
+    return enabled && CheckCollisionPointRec(GetVirtualMousePosition(), bounds) &&
            IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
 
@@ -342,6 +385,16 @@ static void DrawRespawnGoblinButton() {
     }
 
     DrawUiButton("Respawn", RespawnGoblinButtonRect());
+}
+
+static void DrawActionsPanel() {
+    if (gEditingName || gClient.GetState() != net::ClientConnectionState::Joined) {
+        return;
+    }
+
+    const Rectangle panel = ActionsPanelRect();
+    DrawText("Actions", static_cast<int>(panel.x), static_cast<int>(panel.y), 18, LIGHTGRAY);
+    DrawUiButton("Disengage", DisengageButtonRect(), IsLocalPlayerInCombat());
 }
 
 static std::string TruncateToWidth(const std::string& text, int maxWidth, int fontSize) {
@@ -505,6 +558,12 @@ static void HandleUiClicks() {
         gClient.SendRespawnEnemy(net::kDefaultGoblinId);
         return;
     }
+
+    if (gClient.GetState() == net::ClientConnectionState::Joined &&
+        WasUiButtonPressed(DisengageButtonRect(), IsLocalPlayerInCombat())) {
+        gClient.SendDisengage();
+        return;
+    }
 }
 
 #if !defined(PLATFORM_WEB)
@@ -633,7 +692,7 @@ static void UpdateGame() {
     gClient.Update();
 
     const Vector2 virtualMouse = GetVirtualMousePosition();
-    const bool allowCameraInput = !gEditingName && !gChatExpanded
+    const bool allowCameraInput = !gEditingName && !gChatExpanded && !IsMouseOverActionsPanel(virtualMouse)
 #if !defined(PLATFORM_WEB)
                                   && !gOptionsOpen
 #endif
@@ -889,6 +948,7 @@ static void DrawGame() {
     DrawText("Multiplayer Template", 20, 20, 24, RAYWHITE);
     DrawText(gStatusText.c_str(), 20, 52, 18, LIGHTGRAY);
     DrawRespawnGoblinButton();
+    DrawActionsPanel();
 
     if (gEditingName) {
         DrawText("Name:", 20, 100, 20, RAYWHITE);

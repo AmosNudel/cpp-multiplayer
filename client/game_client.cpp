@@ -168,6 +168,19 @@ void GameClient::SendCancelCombat() {
     }
 }
 
+void GameClient::SendDisengage() {
+    if (state_ != ClientConnectionState::Joined) {
+        return;
+    }
+
+    const Message message = MakeDisengageRequest();
+    if (useWebSocket_) {
+        wsClient_.Send(message);
+    } else {
+        tcpClient_.Send(message);
+    }
+}
+
 void GameClient::SendRespawnEnemy(int enemyId) {
     if (state_ != ClientConnectionState::Joined) {
         return;

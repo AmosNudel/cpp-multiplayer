@@ -17,6 +17,13 @@ bool IsInMeleeRange(float ax, float ay, float bx, float by);
 
 void SnapEntityToCellCenter(float& x, float& y);
 
+bool IsCellOccupied(int col, int row, const std::vector<PlayerState>& players,
+                    const std::vector<EnemyState>& enemies, int ignorePlayerId = -1,
+                    int ignoreEnemyId = -1);
+
+std::optional<GridPoint> FindRetreatTile(const GridMap& map, int playerCol, int playerRow,
+                                         int enemyCol, int enemyRow);
+
 std::optional<GridPoint> FindBestAdjacentApproachTile(const GridMap& map, int startCol,
                                                       int startRow, int targetCol,
                                                       int targetRow);

@@ -67,6 +67,25 @@ std::vector<std::pair<int, int>> CollectGoblinSpawnPoints(const GridMap& map, in
     return points;
 }
 
+bool EnemiesShareTiles(const std::vector<EnemyState>& enemies) {
+    for (size_t i = 0; i < enemies.size(); ++i) {
+        if (!IsAlive(enemies[i].state)) {
+            continue;
+        }
+        const int colA = WorldToCellCol(enemies[i].x);
+        const int rowA = WorldToCellRow(enemies[i].y);
+        for (size_t j = i + 1; j < enemies.size(); ++j) {
+            if (!IsAlive(enemies[j].state)) {
+                continue;
+            }
+            if (colA == WorldToCellCol(enemies[j].x) && rowA == WorldToCellRow(enemies[j].y)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 std::pair<int, int> PickRandomGoblinSpawnCell(const GridMap& map,
                                               const std::vector<EnemyState>& enemies,
                                               int excludeEnemyId) {
@@ -74,19 +93,14 @@ std::pair<int, int> PickRandomGoblinSpawnCell(const GridMap& map,
     std::vector<std::pair<int, int>> candidates =
         CollectGoblinSpawnPoints(map, playerCol, playerRow);
 
-    candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
-                                    [&](const std::pair<int, int>& cell) {
-                                        return IsCellOccupiedByEnemy(cell.first, cell.second,
-                                                                     enemies, excludeEnemyId);
-                                    }),
-                     candidates.end());
-
-    if (candidates.empty()) {
-        return {kDefaultGoblinCol, kDefaultGoblinRow};
+    std::shuffle(candidates.begin(), candidates.end(), GoblinSpawnRng());
+    for (const std::pair<int, int>& cell : candidates) {
+        if (!IsCellOccupiedByEnemy(cell.first, cell.second, enemies, excludeEnemyId)) {
+            return cell;
+        }
     }
 
-    std::uniform_int_distribution<size_t> dist(0, candidates.size() - 1);
-    return candidates[dist(GoblinSpawnRng())];
+    return {kDefaultGoblinCol, kDefaultGoblinRow};
 }
 
 EnemyState CreateGoblinAt(int id, int col, int row) {
@@ -110,13 +124,17 @@ std::vector<EnemyState> CreateDefaultEnemies() {
 
     std::shuffle(spawnPoints.begin(), spawnPoints.end(), GoblinSpawnRng());
 
-    const int count =
-        std::min(kDefaultGoblinCount, static_cast<int>(spawnPoints.size()));
     std::vector<EnemyState> enemies;
-    enemies.reserve(static_cast<size_t>(count));
-    for (int i = 0; i < count; ++i) {
-        enemies.push_back(CreateGoblinAt(kDefaultGoblinId + i, spawnPoints[static_cast<size_t>(i)].first,
-                                         spawnPoints[static_cast<size_t>(i)].second));
+    enemies.reserve(static_cast<size_t>(kDefaultGoblinCount));
+    for (const std::pair<int, int>& cell : spawnPoints) {
+        if (static_cast<int>(enemies.size()) >= kDefaultGoblinCount) {
+            break;
+        }
+        if (IsCellOccupiedByEnemy(cell.first, cell.second, enemies, -1)) {
+            continue;
+        }
+        enemies.push_back(
+            CreateGoblinAt(kDefaultGoblinId + static_cast<int>(enemies.size()), cell.first, cell.second));
     }
     return enemies;
 }

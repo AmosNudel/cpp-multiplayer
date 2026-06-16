@@ -118,6 +118,7 @@ const char* MessageTypeName(MessageType type) {
         case MessageType::MoveRequest: return "move_request";
         case MessageType::AttackRequest: return "attack_request";
         case MessageType::CancelCombatRequest: return "cancel_combat_request";
+        case MessageType::DisengageRequest: return "disengage_request";
         case MessageType::RespawnEnemyRequest: return "respawn_enemy_request";
         case MessageType::WorldState: return "world_state";
         case MessageType::PlayerLeft: return "player_left";
@@ -136,6 +137,7 @@ MessageType ParseMessageType(const std::string& value) {
     if (value == "move_request") return MessageType::MoveRequest;
     if (value == "attack_request") return MessageType::AttackRequest;
     if (value == "cancel_combat_request") return MessageType::CancelCombatRequest;
+    if (value == "disengage_request") return MessageType::DisengageRequest;
     if (value == "respawn_enemy_request") return MessageType::RespawnEnemyRequest;
     if (value == "world_state") return MessageType::WorldState;
     if (value == "player_left") return MessageType::PlayerLeft;
@@ -188,6 +190,12 @@ Message MakeAttackRequest(int enemyId) {
 Message MakeCancelCombatRequest() {
     Message message;
     message.type = MessageType::CancelCombatRequest;
+    return message;
+}
+
+Message MakeDisengageRequest() {
+    Message message;
+    message.type = MessageType::DisengageRequest;
     return message;
 }
 
@@ -284,6 +292,8 @@ std::string SerializeMessage(const Message& message) {
             break;
         case MessageType::CancelCombatRequest:
             break;
+        case MessageType::DisengageRequest:
+            break;
         case MessageType::RespawnEnemyRequest:
             json["enemy_id"] = message.respawnEnemyRequest.enemyId;
             break;
@@ -355,6 +365,8 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
                 message.attackRequest.enemyId = json.at("enemy_id").get<int>();
                 break;
             case MessageType::CancelCombatRequest:
+                break;
+            case MessageType::DisengageRequest:
                 break;
             case MessageType::RespawnEnemyRequest:
                 message.respawnEnemyRequest.enemyId =

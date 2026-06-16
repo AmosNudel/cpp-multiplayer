@@ -320,6 +320,15 @@ EnemyState* FindEnemy(std::vector<EnemyState>& enemies, int enemyId) {
     return nullptr;
 }
 
+const EnemyState* FindEnemyConst(const std::vector<EnemyState>& enemies, int enemyId) {
+    for (const EnemyState& enemy : enemies) {
+        if (enemy.id == enemyId) {
+            return &enemy;
+        }
+    }
+    return nullptr;
+}
+
 void EndPlayerCombat(PlayerState& player, std::vector<EnemyState>& enemies, uint32_t tick) {
     if (player.targetId >= 0) {
         if (EnemyState* enemy = FindEnemy(enemies, player.targetId)) {
@@ -551,6 +560,48 @@ void CancelPlayerCombat(PlayerState& player, ConnectedClient& client,
     ResetPlayerCombo(client);
     ClearPlayerMove(client, player);
     EndPlayerCombat(player, enemies, tick);
+}
+
+void DisengagePlayerCombat(PlayerState& player, ConnectedClient& client,
+                           std::vector<EnemyState>& enemies,
+                           const std::vector<PlayerState>& players, const GridMap& map,
+                           uint32_t tick) {
+    if (player.state != EntityState::Combat || player.targetId < 0) {
+        return;
+    }
+
+    const EnemyState* enemy = FindEnemyConst(enemies, player.targetId);
+    if (enemy == nullptr) {
+        CancelPlayerCombat(player, client, enemies, tick);
+        return;
+    }
+
+    SnapEntityToCellCenter(player.x, player.y);
+    const int playerCol = WorldToCellCol(player.x);
+    const int playerRow = WorldToCellRow(player.y);
+    const int enemyCol = WorldToCellCol(enemy->x);
+    const int enemyRow = WorldToCellRow(enemy->y);
+    const bool inMelee = IsInMeleeRange(player.x, player.y, enemy->x, enemy->y);
+
+    CancelPlayerCombat(player, client, enemies, tick);
+
+    if (!inMelee) {
+        return;
+    }
+
+    const std::optional<GridPoint> retreat =
+        FindRetreatTile(map, playerCol, playerRow, enemyCol, enemyRow);
+    if (!retreat.has_value()) {
+        return;
+    }
+
+    if (IsCellOccupied(retreat->first, retreat->second, players, enemies, player.id, -1)) {
+        return;
+    }
+
+    player.x = CellCenterX(retreat->first);
+    player.y = CellCenterY(retreat->second);
+    UpdateFacingFromDirection(player, enemyCol - retreat->first, enemyRow - retreat->second);
 }
 
 void TryApplyComboSwingDamage(PlayerState& player, ConnectedClient& client, EnemyState& enemy,
@@ -1076,6 +1127,9 @@ bool GameServer::Start(uint16_t tcpPort, uint16_t wsPort) {
     running_ = true;
     InitializeEntityRegistry();
     enemies_ = CreateDefaultEnemies();
+    if (EnemiesShareTiles(enemies_)) {
+        std::cerr << "[game] warning: goblins spawned on shared tiles\n";
+    }
     for (EnemyState& enemy : enemies_) {
         enemy.stateStartTick = tick_;
         enemy.animStartTick = tick_;
@@ -1267,6 +1321,21 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             }
 
             CancelPlayerCombat(*player, it->second, enemies_, tick_);
+            break;
+        }
+        case MessageType::DisengageRequest: {
+            auto it = clients_.find(incoming.clientId);
+            if (it == clients_.end() || !it->second.hasJoined) {
+                return;
+            }
+
+            PlayerState* player = FindPlayer(players_, incoming.clientId);
+            if (player == nullptr) {
+                return;
+            }
+
+            DisengagePlayerCombat(*player, it->second, enemies_, players_, DefaultGridMap(),
+                                  tick_);
             break;
         }
         case MessageType::RespawnEnemyRequest: {
