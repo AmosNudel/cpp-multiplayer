@@ -1,0 +1,64 @@
+#pragma once
+
+#include <chrono>
+#include <cstdint>
+#include <deque>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "common/protocol.hpp"
+#include "server/tcp_listener.hpp"
+#include "server/ws_listener.hpp"
+
+namespace net {
+
+enum class TransportKind {
+    Tcp,
+    WebSocket,
+};
+
+struct ConnectedClient {
+    int id = 0;
+    TransportKind transport = TransportKind::Tcp;
+    std::string name;
+    PlayerInput input;
+    bool hasJoined = false;
+};
+
+class GameServer {
+public:
+    bool Start(uint16_t tcpPort, uint16_t wsPort);
+    void Stop();
+    void Run();
+
+private:
+    struct IncomingMessage {
+        int clientId = 0;
+        TransportKind transport = TransportKind::Tcp;
+        Message message;
+    };
+
+    void EnqueueMessage(int clientId, TransportKind transport, const Message& message);
+    void ProcessMessages();
+    void HandleMessage(const IncomingMessage& incoming);
+    void HandleDisconnect(int clientId, TransportKind transport);
+    void SimulateTick();
+    void BroadcastWorldState();
+    bool SendToClient(int clientId, TransportKind transport, const Message& message);
+    std::vector<PlayerState> BuildPlayerSnapshot() const;
+    uint32_t NowMs() const;
+
+    TcpListener tcpListener_;
+    WsListener wsListener_;
+    std::mutex incomingMutex_;
+    std::deque<IncomingMessage> incoming_;
+    std::unordered_map<int, ConnectedClient> clients_;
+    std::unordered_map<int, TransportKind> transportByClientId_;
+    std::vector<PlayerState> players_;
+    uint32_t tick_ = 0;
+    bool running_ = false;
+};
+
+}  // namespace net

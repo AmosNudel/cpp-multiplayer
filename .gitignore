@@ -1,0 +1,16 @@
+*.exe
+*.dsym
+main
+build/
+build-web/
+dist/
+installer/
+CMakeCache.txt
+CMakeFiles/
+_deps/
+*.o
+*.a
+*.wasm
+*.html
+*.js
+*.data
