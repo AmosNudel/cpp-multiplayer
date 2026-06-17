@@ -578,8 +578,7 @@ void BeginCombat(PlayerState& player, EnemyState& enemy, ConnectedClient& client
 bool TryBeginGoblinCombat(EnemyState& enemy, PlayerState& player,
                           std::vector<PlayerState>& players,
                           std::unordered_map<int, ConnectedClient>& clients,
-                          std::vector<EnemyState>& enemies,
-                          std::unordered_map<int, EnemyMovementState>& enemyMovement,
+                          std::vector<EnemyState>& enemies, EnemyMovementState& move,
                           uint32_t tick) {
     SnapEntityToCellCenter(enemy.x, enemy.y);
     SnapEntityToCellCenter(player.x, player.y);
@@ -612,7 +611,7 @@ bool TryBeginGoblinCombat(EnemyState& enemy, PlayerState& player,
     client->pendingAttackEnemyId = -1;
     ResetPlayerCombo(*client);
     if (IsGoblinBoss(enemy)) {
-        ResetBossCombo(enemyMovement[enemy.id]);
+        ResetBossCombo(move);
     }
     BeginCombat(player, enemy, *client, tick);
     return true;
@@ -621,9 +620,7 @@ bool TryBeginGoblinCombat(EnemyState& enemy, PlayerState& player,
 bool StartGoblinChase(EnemyState& enemy, EnemyMovementState& move, PlayerState& player,
                       std::vector<PlayerState>& players,
                       std::unordered_map<int, ConnectedClient>& clients,
-                      std::vector<EnemyState>& enemies,
-                      std::unordered_map<int, EnemyMovementState>& enemyMovement,
-                      const GridMap& map, uint32_t tick) {
+                      std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
     if (IsGoblinBoss(enemy)) {
         return false;
     }
@@ -634,7 +631,7 @@ bool StartGoblinChase(EnemyState& enemy, EnemyMovementState& move, PlayerState& 
 
     if (IsPlayerInMeleeWithEnemy(player.x, player.y, enemy)) {
         ClearEnemyChase(move);
-        return TryBeginGoblinCombat(enemy, player, players, clients, enemies, enemyMovement, tick);
+        return TryBeginGoblinCombat(enemy, player, players, clients, enemies, move, tick);
     }
 
     const int enemyCol = WorldToCellCol(enemy.x);
@@ -684,9 +681,7 @@ bool StartNextPatrolLeg(EnemyState& enemy, EnemyMovementState& move, const GridM
 void TryCompleteGoblinChase(EnemyState& enemy, EnemyMovementState& move, PlayerState& player,
                             std::vector<PlayerState>& players,
                             std::unordered_map<int, ConnectedClient>& clients,
-                            std::vector<EnemyState>& enemies,
-                            std::unordered_map<int, EnemyMovementState>& enemyMovement,
-                            const GridMap& map, uint32_t tick) {
+                            std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
     if (!IsWithinGoblinLeashRange(enemy.x, enemy.y, player.x, player.y)) {
         ClearEnemyChase(move);
         TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
@@ -694,12 +689,12 @@ void TryCompleteGoblinChase(EnemyState& enemy, EnemyMovementState& move, PlayerS
         return;
     }
 
-    if (TryBeginGoblinCombat(enemy, player, players, clients, enemies, enemyMovement, tick)) {
+    if (TryBeginGoblinCombat(enemy, player, players, clients, enemies, move, tick)) {
         ClearEnemyChase(move);
         return;
     }
 
-    StartGoblinChase(enemy, move, player, players, clients, enemies, enemyMovement, map, tick);
+    StartGoblinChase(enemy, move, player, players, clients, enemies, map, tick);
 }
 
 bool TryPathToCombatTarget(PlayerState& player, ConnectedClient& client, const EnemyState& enemy,
@@ -1404,15 +1399,13 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
             if (IsPlayerInMeleeWithEnemy(aggroTarget->x, aggroTarget->y, enemy)) {
                 ClearEnemyMove(move);
                 ClearEnemyChase(move);
-                TryBeginGoblinCombat(enemy, *aggroTarget, players, clients, enemies,
-                                     enemyMovement, tick);
+                TryBeginGoblinCombat(enemy, *aggroTarget, players, clients, enemies, move, tick);
                 return;
             }
 
             if (!move.chasingPlayer || move.chaseTargetId != aggroTarget->id ||
                 !move.hasMoveTarget) {
-                StartGoblinChase(enemy, move, *aggroTarget, players, clients, enemies,
-                                 enemyMovement, map, tick);
+                StartGoblinChase(enemy, move, *aggroTarget, players, clients, enemies, map, tick);
             }
         } else if (move.chasingPlayer) {
             ClearEnemyChase(move);
@@ -1425,8 +1418,7 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
     } else if (IsGoblinBoss(enemy)) {
         if (PlayerState* aggroTarget = FindGoblinAggroTarget(enemy, players)) {
             if (IsPlayerInMeleeWithEnemy(aggroTarget->x, aggroTarget->y, enemy)) {
-                TryBeginGoblinCombat(enemy, *aggroTarget, players, clients, enemies,
-                                     enemyMovement, tick);
+                TryBeginGoblinCombat(enemy, *aggroTarget, players, clients, enemies, move, tick);
             }
         }
         return;
@@ -1440,7 +1432,7 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
                 if (chaseTarget != nullptr) {
                     SnapEntityToCellCenter(enemy.x, enemy.y);
                     TryCompleteGoblinChase(enemy, move, *chaseTarget, players, clients, enemies,
-                                           enemyMovement, map, tick);
+                                           map, tick);
                 } else {
                     ClearEnemyChase(move);
                     TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim,
