@@ -21,6 +21,7 @@ EntityDef EntityDefFromJson(const nlohmann::json& json) {
     def.stats.critDamageMultiplier = json.value("crit_damage_multiplier", 2);
     def.stats.attackCooldownTicks = json.value("attack_cooldown_ticks", 12);
     def.stats.hitStunTicks = json.value("hit_stun_ticks", 8);
+    def.stats.shieldRegenPerTick = json.value("shield_regen_per_tick", 0);
     def.spriteHeight = json.value("sprite_height", 96.0f);
     return def;
 }
@@ -43,6 +44,7 @@ void EntityRegistry::RegisterDefaults() {
         player.stats.critDamageMultiplier = 2;
         player.stats.attackCooldownTicks = 12;
         player.stats.hitStunTicks = 8;
+        player.stats.shieldRegenPerTick = 1;
         player.spriteHeight = 96.0f;
         Register(player);
     }
@@ -51,11 +53,11 @@ void EntityRegistry::RegisterDefaults() {
         EntityDef goblin;
         goblin.id = kGoblinEntityId;
         goblin.displayName = "Goblin";
-        goblin.stats.maxHp = 150;
-        goblin.stats.attackDamage = 8;
+        goblin.stats.maxHp = 130;
+        goblin.stats.attackDamage = 12;
         goblin.stats.critDamageMultiplier = 2;
-        goblin.stats.attackCooldownTicks = 12;
-        goblin.stats.hitStunTicks = 8;
+        goblin.stats.attackCooldownTicks = 14;
+        goblin.stats.hitStunTicks = 6;
         goblin.spriteHeight = 128.0f;
         Register(goblin);
     }

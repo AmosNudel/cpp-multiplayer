@@ -60,7 +60,10 @@ std::optional<GridPoint> FindRetreatTile(const GridMap& map, int playerCol, int 
 
 std::optional<GridPoint> FindBestAdjacentApproachTile(const GridMap& map, int startCol,
                                                       int startRow, int targetCol,
-                                                      int targetRow) {
+                                                      int targetRow,
+                                                      const std::vector<PlayerState>* players,
+                                                      const std::vector<EnemyState>* enemies,
+                                                      int ignorePlayerId, int ignoreEnemyId) {
     static constexpr int kDirections[4][2] = {
         {1, 0},
         {-1, 0},
@@ -79,6 +82,11 @@ std::optional<GridPoint> FindBestAdjacentApproachTile(const GridMap& map, int st
         const int neighborRow = targetRow + direction[1];
         if (!IsValidCell(neighborCol, neighborRow) ||
             !map.IsWalkable(neighborCol, neighborRow)) {
+            continue;
+        }
+        if (players != nullptr && enemies != nullptr &&
+            IsCellOccupied(neighborCol, neighborRow, *players, *enemies, ignorePlayerId,
+                           ignoreEnemyId)) {
             continue;
         }
 
@@ -205,13 +213,12 @@ bool ApplyDamageToPlayer(PlayerState& player, int damage, uint32_t tick, bool cr
         return true;
     }
 
-    if (critical) {
+    if (ShouldInterruptWithHitStun(player.state)) {
         TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
                          EntityState::Hit, tick);
-        return true;
     }
 
-    return false;
+    return true;
 }
 
 bool ApplyDamageToEnemy(EnemyState& enemy, int damage, uint32_t tick, bool critical) {
@@ -227,13 +234,12 @@ bool ApplyDamageToEnemy(EnemyState& enemy, int damage, uint32_t tick, bool criti
         return true;
     }
 
-    if (critical) {
+    if (ShouldInterruptWithHitStun(enemy.state)) {
         TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
                          EntityState::Hit, tick);
-        return true;
     }
 
-    return false;
+    return true;
 }
 
 }  // namespace net

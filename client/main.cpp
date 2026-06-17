@@ -19,6 +19,9 @@
 #include "common/grid_map.hpp"
 #include "common/session.hpp"
 
+#include <algorithm>
+#include <unordered_map>
+
 #if defined(PLATFORM_WEB)
 #include <emscripten.h>
 #endif
@@ -35,9 +38,14 @@ static const char* kAttack3SpritePath =
     "assets/player_sprites/Sprites/without_outline/ATTACK 3.png";
 static const char* kJumpSpritePath =
     "assets/player_sprites/Sprites/with_outline/JUMP.png";
+static const char* kHitSpritePath =
+    "assets/player_sprites/Sprites/with_outline/HURT.png";
+static const char* kDeathSpritePath =
+    "assets/player_sprites/Sprites/with_outline/DEATH.png";
 static const char* kGoblinIdleSpritePath = "assets/enemy/Goblin/Idle.png";
 static const char* kGoblinRunSpritePath = "assets/enemy/Goblin/Run.png";
 static const char* kGoblinAttackSpritePath = "assets/enemy/Goblin/Attack.png";
+static const char* kGoblinHitSpritePath = "assets/enemy/Goblin/Take Hit.png";
 static const char* kGoblinDeathSpritePath = "assets/enemy/Goblin/Death.png";
 static const float kPlayerSpriteHeight = 96.0f;
 static constexpr float kGridScreenBottom = WorldView::kGridVirtualY + net::kWorldHeight;
@@ -115,6 +123,8 @@ struct PlayerSprites {
     SpriteSheet attack2;
     SpriteSheet attack3;
     SpriteSheet jump;
+    SpriteSheet hit;
+    SpriteSheet dead;
 
     void Load() {
         idle.Load(ResolveAssetPath(kIdleSpritePath).c_str(), net::kIdleFrameCount);
@@ -123,6 +133,8 @@ struct PlayerSprites {
         attack2.Load(ResolveAssetPath(kAttack2SpritePath).c_str(), net::kAttack2FrameCount);
         attack3.Load(ResolveAssetPath(kAttack3SpritePath).c_str(), net::kAttack3FrameCount);
         jump.Load(ResolveAssetPath(kJumpSpritePath).c_str(), net::kJumpFrameCount);
+        hit.Load(ResolveAssetPath(kHitSpritePath).c_str(), net::kHitFrameCount);
+        dead.Load(ResolveAssetPath(kDeathSpritePath).c_str(), net::kDeadFrameCount);
     }
 
     void Unload() {
@@ -132,11 +144,13 @@ struct PlayerSprites {
         attack2.Unload();
         attack3.Unload();
         jump.Unload();
+        hit.Unload();
+        dead.Unload();
     }
 
     bool AnyLoaded() const {
         return idle.loaded || run.loaded || attack1.loaded || attack2.loaded || attack3.loaded ||
-               jump.loaded;
+               jump.loaded || hit.loaded || dead.loaded;
     }
 
     const SpriteSheet* SheetForAnim(net::PlayerAnim anim) const {
@@ -146,19 +160,26 @@ struct PlayerSprites {
             case net::PlayerAnim::Attack2: return attack2.loaded ? &attack2 : nullptr;
             case net::PlayerAnim::Attack3: return attack3.loaded ? &attack3 : nullptr;
             case net::PlayerAnim::Jump: return jump.loaded ? &jump : nullptr;
-            case net::PlayerAnim::Hit:
-            case net::PlayerAnim::Dead:
+            case net::PlayerAnim::Hit: return hit.loaded ? &hit : nullptr;
+            case net::PlayerAnim::Dead: return dead.loaded ? &dead : nullptr;
             case net::PlayerAnim::Idle:
             default: return idle.loaded ? &idle : nullptr;
         }
     }
 
-    void Draw(const net::PlayerState& player, uint32_t serverTick, Vector2 center,
-              Color tint) const {
+    void Draw(const net::PlayerState& player, uint32_t serverTick, Vector2 center, Color tint,
+              bool combatHitFlash = false) const {
         if (player.state == net::EntityState::Dead) {
             tint = Color{80, 80, 80, 160};
         } else if (player.state == net::EntityState::Hit) {
             tint = Color{255, 120, 120, 255};
+        } else if (combatHitFlash) {
+            tint = Color{
+                static_cast<unsigned char>(std::min(255, static_cast<int>(tint.r) + 80)),
+                static_cast<unsigned char>(std::max(0, static_cast<int>(tint.g) - 40)),
+                static_cast<unsigned char>(std::max(0, static_cast<int>(tint.b) - 40)),
+                tint.a,
+            };
         }
 
         const int frame =
@@ -177,6 +198,7 @@ struct GoblinSprites {
     SpriteSheet idle;
     SpriteSheet run;
     SpriteSheet attack;
+    SpriteSheet hit;
     SpriteSheet death;
 
     void Load() {
@@ -184,6 +206,7 @@ struct GoblinSprites {
         run.Load(ResolveAssetPath(kGoblinRunSpritePath).c_str(), net::kRunFrameCount);
         attack.Load(ResolveAssetPath(kGoblinAttackSpritePath).c_str(),
                     net::kGoblinAttackFrameCount);
+        hit.Load(ResolveAssetPath(kGoblinHitSpritePath).c_str(), net::kHitFrameCount);
         death.Load(ResolveAssetPath(kGoblinDeathSpritePath).c_str(), net::kGoblinDeathFrameCount);
     }
 
@@ -191,6 +214,7 @@ struct GoblinSprites {
         idle.Unload();
         run.Unload();
         attack.Unload();
+        hit.Unload();
         death.Unload();
     }
 
@@ -200,16 +224,20 @@ struct GoblinSprites {
         switch (anim) {
             case net::PlayerAnim::Attack1: return attack.loaded ? &attack : nullptr;
             case net::PlayerAnim::Run: return run.loaded ? &run : nullptr;
+            case net::PlayerAnim::Hit: return hit.loaded ? &hit : nullptr;
             case net::PlayerAnim::Dead: return death.loaded ? &death : nullptr;
             case net::PlayerAnim::Idle:
             default: return idle.loaded ? &idle : nullptr;
         }
     }
 
-    void Draw(const net::EnemyState& enemy, uint32_t serverTick, Vector2 center) const {
+    void Draw(const net::EnemyState& enemy, uint32_t serverTick, Vector2 center,
+              bool combatHitFlash = false) const {
         Color tint = WHITE;
         if (enemy.state == net::EntityState::Hit) {
             tint = Color{255, 160, 160, 255};
+        } else if (combatHitFlash) {
+            tint = Color{255, 200, 200, 255};
         }
 
         if (!idle.loaded) {
@@ -244,6 +272,34 @@ static bool gOptionsOpen = false;
 static Color gLocalColor = RAYWHITE;
 static bool gSpectating = false;
 static int gSpectateTargetId = -1;
+
+struct EntityVisualState {
+    float displayX = 0.0f;
+    float displayY = 0.0f;
+    float fromX = 0.0f;
+    float fromY = 0.0f;
+    float toX = 0.0f;
+    float toY = 0.0f;
+    int lastHp = -1;
+    int lastShield = -1;
+    double snapTime = 0.0;
+    double hitFlashUntil = 0.0;
+};
+
+struct FloatingDamage {
+    float x = 0.0f;
+    float y = 0.0f;
+    int amount = 0;
+    double spawnTime = 0.0;
+};
+
+static std::unordered_map<int, EntityVisualState> gPlayerVisuals;
+static std::unordered_map<int, EntityVisualState> gEnemyVisuals;
+static std::vector<FloatingDamage> gFloatingDamage;
+static uint32_t gLastSyncedTick = 0;
+
+static constexpr double kCombatHitFlashDuration = 0.12;
+static constexpr double kFloatingDamageDuration = 0.9;
 
 static void DrawUiButton(const char* label, Rectangle bounds, bool enabled = true);
 static bool WasUiButtonPressed(Rectangle bounds, bool enabled = true);
@@ -595,6 +651,152 @@ static void DrawArenaWipeOverlay() {
              panelY + 48, 18, LIGHTGRAY);
 }
 
+static void ResetClientVisualState() {
+    gPlayerVisuals.clear();
+    gEnemyVisuals.clear();
+    gFloatingDamage.clear();
+    gLastSyncedTick = 0;
+}
+
+static Vector2 InterpolatedPosition(const EntityVisualState& visual) {
+    const double elapsed = GetTime() - visual.snapTime;
+    const float alpha =
+        std::min(1.0f, static_cast<float>(elapsed / static_cast<double>(net::kTickDuration)));
+    return {
+        visual.fromX + (visual.toX - visual.fromX) * alpha,
+        visual.fromY + (visual.toY - visual.fromY) * alpha,
+    };
+}
+
+static void SyncEntityVisual(const net::PlayerState& entity, EntityVisualState& visual,
+                             bool trackDamage) {
+    const double now = GetTime();
+    if (visual.lastHp < 0) {
+        visual.displayX = entity.x;
+        visual.displayY = entity.y;
+        visual.fromX = entity.x;
+        visual.fromY = entity.y;
+        visual.toX = entity.x;
+        visual.toY = entity.y;
+        visual.snapTime = now;
+        visual.lastHp = entity.hp;
+        visual.lastShield = entity.shield;
+        return;
+    }
+
+    if (entity.x != visual.toX || entity.y != visual.toY) {
+        const Vector2 current = InterpolatedPosition(visual);
+        visual.fromX = current.x;
+        visual.fromY = current.y;
+        visual.toX = entity.x;
+        visual.toY = entity.y;
+        visual.snapTime = now;
+    }
+
+    if (trackDamage) {
+        const int totalHp = entity.hp + entity.shield;
+        const int lastTotal = visual.lastHp + std::max(0, visual.lastShield);
+        if (totalHp < lastTotal) {
+            gFloatingDamage.push_back(
+                FloatingDamage{entity.x, entity.y - 24.0f, lastTotal - totalHp, now});
+            if (entity.state == net::EntityState::Combat) {
+                visual.hitFlashUntil = now + kCombatHitFlashDuration;
+            }
+        }
+        visual.lastHp = entity.hp;
+        visual.lastShield = entity.shield;
+    }
+}
+
+static void SyncEntityVisuals() {
+    const uint32_t tick = gClient.GetServerTick();
+    if (gClient.GetState() != net::ClientConnectionState::Joined) {
+        return;
+    }
+    if (tick == gLastSyncedTick && !gPlayerVisuals.empty()) {
+        return;
+    }
+    gLastSyncedTick = tick;
+
+    std::unordered_map<int, EntityVisualState> nextPlayers;
+    for (const net::PlayerState& player : gClient.GetPlayers()) {
+        EntityVisualState visual = gPlayerVisuals[player.id];
+        SyncEntityVisual(player, visual, true);
+        nextPlayers[player.id] = visual;
+    }
+    gPlayerVisuals = std::move(nextPlayers);
+
+    std::unordered_map<int, EntityVisualState> nextEnemies;
+    for (const net::EnemyState& enemy : gClient.GetEnemies()) {
+        EntityVisualState visual = gEnemyVisuals[enemy.id];
+        net::PlayerState proxy;
+        proxy.x = enemy.x;
+        proxy.y = enemy.y;
+        proxy.hp = enemy.hp;
+        proxy.shield = 0;
+        proxy.state = enemy.state;
+        SyncEntityVisual(proxy, visual, true);
+        nextEnemies[enemy.id] = visual;
+    }
+    gEnemyVisuals = std::move(nextEnemies);
+
+    const double now = GetTime();
+    gFloatingDamage.erase(
+        std::remove_if(gFloatingDamage.begin(), gFloatingDamage.end(),
+                       [now](const FloatingDamage& entry) {
+                           return now - entry.spawnTime > kFloatingDamageDuration;
+                       }),
+        gFloatingDamage.end());
+}
+
+static Vector2 DisplayPositionForPlayer(const net::PlayerState& player) {
+    const auto it = gPlayerVisuals.find(player.id);
+    if (it == gPlayerVisuals.end()) {
+        return {player.x, player.y};
+    }
+    return InterpolatedPosition(it->second);
+}
+
+static Vector2 DisplayPositionForEnemy(const net::EnemyState& enemy) {
+    const auto it = gEnemyVisuals.find(enemy.id);
+    if (it == gEnemyVisuals.end()) {
+        return {enemy.x, enemy.y};
+    }
+    return InterpolatedPosition(it->second);
+}
+
+static bool IsCombatHitFlashing(const EntityVisualState* visual) {
+    return visual != nullptr && GetTime() < visual->hitFlashUntil;
+}
+
+static void DrawFloatingDamage() {
+    const double now = GetTime();
+    for (const FloatingDamage& entry : gFloatingDamage) {
+        const float t = static_cast<float>((now - entry.spawnTime) / kFloatingDamageDuration);
+        const Vector2 virtualPos =
+            gWorldView.WorldToVirtual({entry.x, entry.y - t * 28.0f});
+        const int alpha = static_cast<int>(255.0f * (1.0f - t));
+        DrawText(TextFormat("-%d", entry.amount), static_cast<int>(virtualPos.x - 12.0f),
+                 static_cast<int>(virtualPos.y), 18, Color{255, 90, 90, static_cast<unsigned char>(alpha)});
+    }
+}
+
+static void DrawCombatTargetHighlights() {
+    const net::PlayerState* local = FindLocalPlayer();
+    if (local == nullptr || local->targetId < 0) {
+        return;
+    }
+
+    for (const net::EnemyState& enemy : gClient.GetEnemies()) {
+        if (enemy.id != local->targetId || enemy.state == net::EntityState::Dead) {
+            continue;
+        }
+        const Vector2 pos = DisplayPositionForEnemy(enemy);
+        DrawCircleLines(pos.x, pos.y, net::kPlayerRadius + 10.0f, Color{255, 220, 80, 220});
+        DrawCircleLines(pos.x, pos.y, net::kPlayerRadius + 12.0f, Color{255, 220, 80, 100});
+    }
+}
+
 static net::SceneId GetLocalScene() {
     if (const net::PlayerState* player = FindLocalPlayer()) {
         return player->sceneId;
@@ -781,7 +983,7 @@ static void DrawRespawnGoblinButton() {
         return;
     }
 
-    DrawUiButton("Respawn", RespawnGoblinButtonRect());
+    DrawUiButton("Respawn All", RespawnGoblinButtonRect());
 }
 
 static void DrawActionsPanel() {
@@ -831,6 +1033,7 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
             gChatInput.clear();
             gSpectating = false;
             gSpectateTargetId = -1;
+            ResetClientVisualState();
 #if !defined(PLATFORM_WEB)
             gOptionsOpen = false;
 #endif
@@ -855,6 +1058,7 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
             gEditingName = true;
             gChatExpanded = false;
             gChatInput.clear();
+            ResetClientVisualState();
 #if !defined(PLATFORM_WEB)
             gOptionsOpen = false;
 #endif
@@ -978,7 +1182,7 @@ static void HandleUiClicks() {
     if (gClient.GetState() == net::ClientConnectionState::Joined &&
         GetLocalScene() == net::SceneId::Arena &&
         WasUiButtonPressed(RespawnGoblinButtonRect())) {
-        gClient.SendRespawnEnemy(net::kDefaultGoblinId);
+        gClient.SendRespawnEnemy(net::kRespawnAllDeadEnemiesId);
         return;
     }
 
@@ -1181,6 +1385,7 @@ static void HandleChatInput() {
 static void UpdateGame() {
     gViewport.UpdateLayout();
     gClient.Update();
+    SyncEntityVisuals();
     UpdateStatusText();
 
     if (GetLocalScene() != net::SceneId::Arena || !IsLocalPlayerDead()) {
@@ -1372,13 +1577,20 @@ static void DrawPlayerBars(const net::PlayerState& player, Vector2 center) {
 }
 
 static void DrawPlayerSprite(const net::PlayerState& player, Color color) {
-    const Vector2 center = {player.x, player.y};
-    gPlayerSprites.Draw(player, gClient.GetServerTick(), center, color);
+    const Vector2 center = DisplayPositionForPlayer(player);
+    const EntityVisualState* visual = nullptr;
+    if (const auto it = gPlayerVisuals.find(player.id); it != gPlayerVisuals.end()) {
+        visual = &it->second;
+    }
+    const bool combatHitFlash =
+        player.state == net::EntityState::Combat && IsCombatHitFlashing(visual);
+    gPlayerSprites.Draw(player, gClient.GetServerTick(), center, color, combatHitFlash);
     DrawPlayerBars(player, center);
 }
 
 static void DrawPlayerName(const net::PlayerState& player, float nameOffsetY) {
-    const Vector2 virtualCenter = gWorldView.WorldToVirtual({player.x, player.y});
+    const Vector2 displayPos = DisplayPositionForPlayer(player);
+    const Vector2 virtualCenter = gWorldView.WorldToVirtual(displayPos);
     std::string label = player.name;
     if (player.sceneId == net::SceneId::Hub && player.isReady) {
         label += " [ready]";
@@ -1390,8 +1602,14 @@ static void DrawPlayerName(const net::PlayerState& player, float nameOffsetY) {
 }
 
 static void DrawEnemy(const net::EnemyState& enemy) {
-    const Vector2 center = {enemy.x, enemy.y};
-    gGoblinSprites.Draw(enemy, gClient.GetServerTick(), center);
+    const Vector2 center = DisplayPositionForEnemy(enemy);
+    const EntityVisualState* visual = nullptr;
+    if (const auto it = gEnemyVisuals.find(enemy.id); it != gEnemyVisuals.end()) {
+        visual = &it->second;
+    }
+    const bool combatHitFlash =
+        enemy.state == net::EntityState::Combat && IsCombatHitFlashing(visual);
+    gGoblinSprites.Draw(enemy, gClient.GetServerTick(), center, combatHitFlash);
     if (enemy.state != net::EntityState::Dead) {
         const net::EntityDef& def = net::DefaultEntityRegistry().MustFind(enemy.kind);
         DrawEntityHpBar(center, enemy.hp, def.stats.maxHp, def.spriteHeight);
@@ -1425,6 +1643,7 @@ static void DrawGame() {
     DrawRectangleLines(0, 0, static_cast<int>(net::kWorldWidth),
                        static_cast<int>(net::kWorldHeight), Color{70, 76, 92, 255});
     DrawGridHighlights();
+    DrawCombatTargetHighlights();
     DrawEnemies();
 
     const int localPlayerId = gClient.GetLocalPlayerId();
@@ -1454,6 +1673,8 @@ static void DrawGame() {
 
     EndMode2D();
     EndScissorMode();
+
+    DrawFloatingDamage();
 
     const float nameOffsetY = gPlayerSprites.AnyLoaded()
                                   ? kPlayerSpriteHeight * 0.5f + 8.0f

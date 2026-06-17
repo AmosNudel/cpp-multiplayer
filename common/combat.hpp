@@ -26,7 +26,13 @@ std::optional<GridPoint> FindRetreatTile(const GridMap& map, int playerCol, int 
 
 std::optional<GridPoint> FindBestAdjacentApproachTile(const GridMap& map, int startCol,
                                                       int startRow, int targetCol,
-                                                      int targetRow);
+                                                      int targetRow,
+                                                      const std::vector<PlayerState>* players =
+                                                          nullptr,
+                                                      const std::vector<EnemyState>* enemies =
+                                                          nullptr,
+                                                      int ignorePlayerId = -1,
+                                                      int ignoreEnemyId = -1);
 
 void TransitionEntity(EntityState& state, uint32_t& stateStartTick, PlayerAnim& anim,
                       uint32_t& animStartTick, EntityState newState, uint32_t tick);
@@ -44,6 +50,10 @@ int CurrentAnimFrame(PlayerAnim anim, uint32_t tick, uint32_t animStartTick);
 bool IsAnimFinished(PlayerAnim anim, uint32_t tick, uint32_t animStartTick);
 
 bool RollCriticalHit(int attackerId, int targetId, uint32_t tick, int chancePercent);
+
+inline bool ShouldInterruptWithHitStun(EntityState state) {
+    return state != EntityState::Combat && state != EntityState::Disengaging;
+}
 
 bool ApplyDamageToPlayer(PlayerState& player, int damage, uint32_t tick, bool critical);
 bool ApplyDamageToEnemy(EnemyState& enemy, int damage, uint32_t tick, bool critical);

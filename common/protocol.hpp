@@ -160,7 +160,7 @@ Message MakeMoveRequest(int col, int row);
 Message MakeAttackRequest(int enemyId);
 Message MakeCancelCombatRequest();
 Message MakeDisengageRequest();
-Message MakeRespawnEnemyRequest(int enemyId = kDefaultGoblinId);
+Message MakeRespawnEnemyRequest(int enemyId = kRespawnAllDeadEnemiesId);
 Message MakeSetReadyRequest(bool ready);
 Message MakeReturnToHubRequest();
 Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players,

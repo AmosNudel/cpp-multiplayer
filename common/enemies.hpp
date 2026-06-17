@@ -27,8 +27,10 @@ inline constexpr int kDefaultGoblinCount = 5;
 inline constexpr int kGoblinMinSpawnDistanceFromPlayer = 4;
 inline constexpr int kGoblinMinSpawnSeparation = 3;
 inline constexpr int kGoblinPatrolRadius = 2;
-inline constexpr int kGoblinAggroCellDistance = 1;
+inline constexpr int kGoblinAggroCellDistance = 5;
+inline constexpr int kGoblinLeashCellDistance = 8;
 inline constexpr int kGoblinPatrolIdleTicks = 60;
+inline constexpr int kRespawnAllDeadEnemiesId = 0;
 
 struct EnemyState {
     int id = 0;
@@ -65,6 +67,7 @@ inline int GoblinAnimFrameCount(PlayerAnim anim) {
         case PlayerAnim::Attack1: return kGoblinAttackFrameCount;
         case PlayerAnim::Run: return kRunFrameCount;
         case PlayerAnim::Dead: return kGoblinDeathFrameCount;
+        case PlayerAnim::Hit: return kHitFrameCount;
         case PlayerAnim::Idle:
         default: return kGoblinIdleFrameCount;
     }
@@ -75,6 +78,7 @@ inline int GoblinAnimTicksPerFrame(PlayerAnim anim) {
         case PlayerAnim::Attack1: return kGoblinAttackAnimTicksPerFrame;
         case PlayerAnim::Run: return kRunAnimTicksPerFrame;
         case PlayerAnim::Dead: return kGoblinDeathAnimTicksPerFrame;
+        case PlayerAnim::Hit: return kHitAnimTicksPerFrame;
         case PlayerAnim::Idle:
         default: return kGoblinIdleAnimTicksPerFrame;
     }
@@ -93,7 +97,7 @@ inline int GoblinAnimFrameIndex(PlayerAnim anim, uint32_t serverTick, uint32_t a
     }
 
     const int frame = static_cast<int>(elapsed / static_cast<uint32_t>(ticksPerFrame));
-    if (anim == PlayerAnim::Attack1 || anim == PlayerAnim::Dead) {
+    if (anim == PlayerAnim::Attack1 || anim == PlayerAnim::Dead || anim == PlayerAnim::Hit) {
         return frame >= frameCount ? frameCount - 1 : frame;
     }
 

@@ -16,6 +16,7 @@ struct CombatStats {
     int critDamageMultiplier = 2;
     int attackCooldownTicks = 12;
     int hitStunTicks = 8;
+    int shieldRegenPerTick = 0;
 };
 
 struct EntityDef {

@@ -32,7 +32,7 @@ public:
     void SendAttackRequest(int enemyId);
     void SendCancelCombat();
     void SendDisengage();
-    void SendRespawnEnemy(int enemyId = net::kDefaultGoblinId);
+    void SendRespawnEnemy(int enemyId = net::kRespawnAllDeadEnemiesId);
     void SendSetReady(bool ready);
     void SendReturnToHub();
     void SendChat(const std::string& text);

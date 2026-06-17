@@ -270,8 +270,28 @@ std::vector<EnemyState> CreateDefaultEnemies() {
             continue;
         }
         enemies.push_back(
-            CreateGoblinAt(kDefaultGoblinId + static_cast<int>(enemies.size()), cell.first, cell.second));
+            CreateGoblinAt(kDefaultGoblinId + static_cast<int>(enemies.size()), cell.first,
+                           cell.second));
     }
+
+    if (static_cast<int>(enemies.size()) < kDefaultGoblinCount) {
+        for (const std::pair<int, int>& cell : spawnPoints) {
+            if (static_cast<int>(enemies.size()) >= kDefaultGoblinCount) {
+                break;
+            }
+            if (IsCellOccupiedByEnemy(cell.first, cell.second, enemies, -1)) {
+                continue;
+            }
+            if (ManhattanCellDistance(cell.first, cell.second, playerCol, playerRow) <
+                kGoblinMinSpawnDistanceFromPlayer) {
+                continue;
+            }
+            enemies.push_back(
+                CreateGoblinAt(kDefaultGoblinId + static_cast<int>(enemies.size()), cell.first,
+                               cell.second));
+        }
+    }
+
     return enemies;
 }
 

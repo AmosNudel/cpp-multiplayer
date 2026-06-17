@@ -128,7 +128,12 @@ void InitializeGoblinMovement(EnemyMovementState& move, const GridMap& map,
 }
 
 bool StartEnemyPath(EnemyState& enemy, EnemyMovementState& move, const GridMap& map, int goalCol,
-                    int goalRow, uint32_t tick) {
+                    int goalRow, uint32_t tick, const std::vector<PlayerState>& players,
+                    const std::vector<EnemyState>& enemies) {
+    if (IsCellOccupied(goalCol, goalRow, players, enemies, -1, enemy.id)) {
+        return false;
+    }
+
     const int startCol = WorldToCellCol(enemy.x);
     const int startRow = WorldToCellRow(enemy.y);
     std::vector<GridPoint> path = FindPath(map, startCol, startRow, goalCol, goalRow);
@@ -156,7 +161,9 @@ bool StartEnemyPath(EnemyState& enemy, EnemyMovementState& move, const GridMap& 
     return true;
 }
 
-bool StepEnemyMovement(EnemyState& enemy, EnemyMovementState& move) {
+bool StepEnemyMovement(EnemyState& enemy, EnemyMovementState& move,
+                       const std::vector<PlayerState>& players,
+                       const std::vector<EnemyState>& enemies) {
     if (!move.hasMoveTarget || move.pathIndex >= move.movePath.size()) {
         return false;
     }
@@ -167,8 +174,15 @@ bool StepEnemyMovement(EnemyState& enemy, EnemyMovementState& move) {
 
     while (remainingStep > 0.0f && move.pathIndex < move.movePath.size()) {
         const auto& waypoint = move.movePath[move.pathIndex];
-        const float targetX = CellCenterX(waypoint.first);
-        const float targetY = CellCenterY(waypoint.second);
+        const int waypointCol = waypoint.first;
+        const int waypointRow = waypoint.second;
+        if (IsCellOccupied(waypointCol, waypointRow, players, enemies, -1, enemy.id)) {
+            ClearEnemyMove(move);
+            return moved;
+        }
+
+        const float targetX = CellCenterX(waypointCol);
+        const float targetY = CellCenterY(waypointRow);
         float dx = targetX - enemy.x;
         float dy = targetY - enemy.y;
         const float dist = std::sqrt(dx * dx + dy * dy);
@@ -219,6 +233,30 @@ bool IsWithinGoblinAggroRange(float ax, float ay, float bx, float by) {
     const int colB = WorldToCellCol(bx);
     const int rowB = WorldToCellRow(by);
     return ManhattanCellDistance(colA, rowA, colB, rowB) <= kGoblinAggroCellDistance;
+}
+
+bool IsWithinGoblinLeashRange(float ax, float ay, float bx, float by) {
+    const int colA = WorldToCellCol(ax);
+    const int rowA = WorldToCellRow(ay);
+    const int colB = WorldToCellCol(bx);
+    const int rowB = WorldToCellRow(by);
+    return ManhattanCellDistance(colA, rowA, colB, rowB) <= kGoblinLeashCellDistance;
+}
+
+int FindReplacementEnemyTarget(const EnemyState& enemy, const std::vector<PlayerState>& players) {
+    for (const PlayerState& player : players) {
+        if (player.sceneId != SceneId::Arena || !IsAlive(player.state)) {
+            continue;
+        }
+        if (player.state != EntityState::Combat || player.targetId != enemy.id) {
+            continue;
+        }
+        if (!IsInMeleeRange(enemy.x, enemy.y, player.x, player.y)) {
+            continue;
+        }
+        return player.id;
+    }
+    return -1;
 }
 
 PlayerState* FindGoblinAggroTarget(const EnemyState& enemy, std::vector<PlayerState>& players) {
@@ -272,7 +310,13 @@ bool IsVoluntaryMove(const ConnectedClient& client, const PlayerState& player) {
 }
 
 bool StartPlayerPath(ConnectedClient& client, PlayerState& player, const GridMap& map,
-                     int goalCol, int goalRow, uint32_t tick) {
+                     int goalCol, int goalRow, uint32_t tick,
+                     const std::vector<PlayerState>& players,
+                     const std::vector<EnemyState>& enemies) {
+    if (IsCellOccupied(goalCol, goalRow, players, enemies, player.id, -1)) {
+        return false;
+    }
+
     const int startCol = WorldToCellCol(player.x);
     const int startRow = WorldToCellRow(player.y);
     std::vector<GridPoint> path = FindPath(map, startCol, startRow, goalCol, goalRow);
@@ -341,21 +385,26 @@ const EnemyState* FindEnemyConst(const std::vector<EnemyState>& enemies, int ene
     return nullptr;
 }
 
-void BreakPlayerCombatLink(PlayerState& player, std::vector<EnemyState>& enemies, uint32_t tick) {
+void BreakPlayerCombatLink(PlayerState& player, std::vector<PlayerState>& players,
+                           std::vector<EnemyState>& enemies, uint32_t tick) {
     if (player.targetId >= 0) {
         if (EnemyState* enemy = FindEnemy(enemies, player.targetId)) {
-            enemy->targetId = -1;
-            if (IsAlive(enemy->state) && enemy->state == EntityState::Combat) {
-                TransitionEntity(enemy->state, enemy->stateStartTick, enemy->anim,
-                                 enemy->animStartTick, EntityState::Idle, tick);
+            if (enemy->targetId == player.id) {
+                enemy->targetId = FindReplacementEnemyTarget(*enemy, players);
+                if (enemy->targetId < 0 && IsAlive(enemy->state) &&
+                    enemy->state == EntityState::Combat) {
+                    TransitionEntity(enemy->state, enemy->stateStartTick, enemy->anim,
+                                     enemy->animStartTick, EntityState::Idle, tick);
+                }
             }
         }
     }
     player.targetId = -1;
 }
 
-void EndPlayerCombat(PlayerState& player, std::vector<EnemyState>& enemies, uint32_t tick) {
-    BreakPlayerCombatLink(player, enemies, tick);
+void EndPlayerCombat(PlayerState& player, std::vector<PlayerState>& players,
+                     std::vector<EnemyState>& enemies, uint32_t tick) {
+    BreakPlayerCombatLink(player, players, enemies, tick);
     if (IsAlive(player.state) && player.state == EntityState::Combat) {
         TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
                          EntityState::Idle, tick);
@@ -399,9 +448,16 @@ void BeginCombat(PlayerState& player, EnemyState& enemy, ConnectedClient& client
     SnapEntityToCellCenter(enemy.x, enemy.y);
 
     player.targetId = enemy.id;
-    enemy.targetId = player.id;
+    const bool enemyAlreadyEngaged =
+        enemy.state == EntityState::Combat && enemy.targetId >= 0;
+    if (!enemyAlreadyEngaged) {
+        enemy.targetId = player.id;
+    }
+
     TransitionEntityState(player.state, player.stateStartTick, EntityState::Combat, tick);
-    TransitionEntityState(enemy.state, enemy.stateStartTick, EntityState::Combat, tick);
+    if (enemy.state != EntityState::Combat) {
+        TransitionEntityState(enemy.state, enemy.stateStartTick, EntityState::Combat, tick);
+    }
     UpdateFacingFromDirection(player, enemy.x - player.x, enemy.y - player.y);
     UpdateEnemyFacing(enemy, player.x - enemy.x, player.y - enemy.y);
 
@@ -416,6 +472,7 @@ void BeginCombat(PlayerState& player, EnemyState& enemy, ConnectedClient& client
 }
 
 bool TryBeginGoblinCombat(EnemyState& enemy, PlayerState& player,
+                          std::vector<PlayerState>& players,
                           std::unordered_map<int, ConnectedClient>& clients,
                           std::vector<EnemyState>& enemies, uint32_t tick) {
     SnapEntityToCellCenter(enemy.x, enemy.y);
@@ -437,7 +494,14 @@ bool TryBeginGoblinCombat(EnemyState& enemy, PlayerState& player,
         return false;
     }
 
-    EndPlayerCombat(player, enemies, tick);
+    if (player.targetId == enemy.id && player.state == EntityState::Combat) {
+        return true;
+    }
+
+    if (player.targetId >= 0 && player.targetId != enemy.id) {
+        EndPlayerCombat(player, players, enemies, tick);
+    }
+
     ClearPlayerMove(*client, player);
     client->pendingAttackEnemyId = -1;
     ResetPlayerCombo(*client);
@@ -446,6 +510,7 @@ bool TryBeginGoblinCombat(EnemyState& enemy, PlayerState& player,
 }
 
 bool StartGoblinChase(EnemyState& enemy, EnemyMovementState& move, PlayerState& player,
+                      std::vector<PlayerState>& players,
                       std::unordered_map<int, ConnectedClient>& clients,
                       std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
     ClearEnemyMove(move);
@@ -454,21 +519,22 @@ bool StartGoblinChase(EnemyState& enemy, EnemyMovementState& move, PlayerState& 
 
     if (IsInMeleeRange(enemy.x, enemy.y, player.x, player.y)) {
         ClearEnemyChase(move);
-        return TryBeginGoblinCombat(enemy, player, clients, enemies, tick);
+        return TryBeginGoblinCombat(enemy, player, players, clients, enemies, tick);
     }
 
     const int enemyCol = WorldToCellCol(enemy.x);
     const int enemyRow = WorldToCellRow(enemy.y);
     const int playerCol = WorldToCellCol(player.x);
     const int playerRow = WorldToCellRow(player.y);
-    const std::optional<GridPoint> approach =
-        FindBestAdjacentApproachTile(map, enemyCol, enemyRow, playerCol, playerRow);
+    const std::optional<GridPoint> approach = FindBestAdjacentApproachTile(
+        map, enemyCol, enemyRow, playerCol, playerRow, &players, &enemies, -1, enemy.id);
     if (!approach.has_value()) {
         ClearEnemyChase(move);
         return false;
     }
 
-    if (!StartEnemyPath(enemy, move, map, approach->first, approach->second, tick)) {
+    if (!StartEnemyPath(enemy, move, map, approach->first, approach->second, tick, players,
+                        enemies)) {
         ClearEnemyChase(move);
         return false;
     }
@@ -477,6 +543,7 @@ bool StartGoblinChase(EnemyState& enemy, EnemyMovementState& move, PlayerState& 
 }
 
 bool StartNextPatrolLeg(EnemyState& enemy, EnemyMovementState& move, const GridMap& map,
+                        const std::vector<PlayerState>& players,
                         const std::vector<EnemyState>& enemies, uint32_t tick) {
     if (move.patrolWaypoints.empty()) {
         return false;
@@ -489,7 +556,7 @@ bool StartNextPatrolLeg(EnemyState& enemy, EnemyMovementState& move, const GridM
         if (IsPatrolGoalBlocked(goal.first, goal.second, enemy.id, enemies)) {
             continue;
         }
-        if (StartEnemyPath(enemy, move, map, goal.first, goal.second, tick)) {
+        if (StartEnemyPath(enemy, move, map, goal.first, goal.second, tick, players, enemies)) {
             move.patrolWaypointIndex = (move.patrolWaypointIndex + 1) % move.patrolWaypoints.size();
             return true;
         }
@@ -500,40 +567,45 @@ bool StartNextPatrolLeg(EnemyState& enemy, EnemyMovementState& move, const GridM
 }
 
 void TryCompleteGoblinChase(EnemyState& enemy, EnemyMovementState& move, PlayerState& player,
+                            std::vector<PlayerState>& players,
                             std::unordered_map<int, ConnectedClient>& clients,
                             std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
-    if (!IsWithinGoblinAggroRange(enemy.x, enemy.y, player.x, player.y)) {
+    if (!IsWithinGoblinLeashRange(enemy.x, enemy.y, player.x, player.y)) {
         ClearEnemyChase(move);
         TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
                          EntityState::Idle, tick);
         return;
     }
 
-    if (TryBeginGoblinCombat(enemy, player, clients, enemies, tick)) {
+    if (TryBeginGoblinCombat(enemy, player, players, clients, enemies, tick)) {
         ClearEnemyChase(move);
         return;
     }
 
-    StartGoblinChase(enemy, move, player, clients, enemies, map, tick);
+    StartGoblinChase(enemy, move, player, players, clients, enemies, map, tick);
 }
 
 bool TryPathToCombatTarget(PlayerState& player, ConnectedClient& client, const EnemyState& enemy,
-                           const GridMap& map, uint32_t tick) {
+                           const GridMap& map, uint32_t tick,
+                           const std::vector<PlayerState>& players,
+                           const std::vector<EnemyState>& enemies) {
     const int playerCol = WorldToCellCol(player.x);
     const int playerRow = WorldToCellRow(player.y);
     const int enemyCol = WorldToCellCol(enemy.x);
     const int enemyRow = WorldToCellRow(enemy.y);
-    const std::optional<GridPoint> approach =
-        FindBestAdjacentApproachTile(map, playerCol, playerRow, enemyCol, enemyRow);
+    const std::optional<GridPoint> approach = FindBestAdjacentApproachTile(
+        map, playerCol, playerRow, enemyCol, enemyRow, &players, &enemies, player.id, enemy.id);
     if (!approach.has_value()) {
         return false;
     }
 
     client.pendingAttackEnemyId = enemy.id;
-    return StartPlayerPath(client, player, map, approach->first, approach->second, tick);
+    return StartPlayerPath(client, player, map, approach->first, approach->second, tick, players,
+                           enemies);
 }
 
 void RecoverPlayerAfterHit(PlayerState& player, ConnectedClient& client,
+                           std::vector<PlayerState>& players,
                            std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
     if (IsVoluntaryMove(client, player)) {
         if (player.hp <= 0) {
@@ -556,7 +628,7 @@ void RecoverPlayerAfterHit(PlayerState& player, ConnectedClient& client,
 
     EnemyState* enemy = FindEnemy(enemies, player.targetId);
     if (enemy == nullptr || !IsAlive(enemy->state)) {
-        EndPlayerCombat(player, enemies, tick);
+        EndPlayerCombat(player, players, enemies, tick);
         TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
                          EntityState::Idle, tick);
         return;
@@ -567,23 +639,24 @@ void RecoverPlayerAfterHit(PlayerState& player, ConnectedClient& client,
         return;
     }
 
-    if (TryPathToCombatTarget(player, client, *enemy, map, tick)) {
+    if (TryPathToCombatTarget(player, client, *enemy, map, tick, players, enemies)) {
         return;
     }
 
-    EndPlayerCombat(player, enemies, tick);
+    EndPlayerCombat(player, players, enemies, tick);
     TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
                      EntityState::Idle, tick);
 }
 
 void CancelPlayerCombat(PlayerState& player, ConnectedClient& client,
-                        std::vector<EnemyState>& enemies, uint32_t tick) {
+                        std::vector<PlayerState>& players, std::vector<EnemyState>& enemies,
+                        uint32_t tick) {
     client.pendingAttackEnemyId = -1;
     ResetPlayerCombo(client);
     ClearPlayerMove(client, player);
     ClearPlayerDisengage(client);
     ClearPendingMoveAfterDisengage(client);
-    EndPlayerCombat(player, enemies, tick);
+    EndPlayerCombat(player, players, enemies, tick);
 }
 
 void StartPlayerDisengage(PlayerState& player, ConnectedClient& client, float targetX,
@@ -600,7 +673,8 @@ void StartPlayerDisengage(PlayerState& player, ConnectedClient& client, float ta
 }
 
 void UpdatePlayerDisengage(PlayerState& player, ConnectedClient& client, const GridMap& map,
-                           uint32_t tick) {
+                           uint32_t tick, const std::vector<PlayerState>& players,
+                           const std::vector<EnemyState>& enemies) {
     if (!client.hasDisengageTarget) {
         TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
                          EntityState::Idle, tick);
@@ -632,7 +706,7 @@ void UpdatePlayerDisengage(PlayerState& player, ConnectedClient& client, const G
     ClearPendingMoveAfterDisengage(client);
 
     if (pendingCol >= 0 && pendingRow >= 0 &&
-        StartPlayerPath(client, player, map, pendingCol, pendingRow, tick)) {
+        StartPlayerPath(client, player, map, pendingCol, pendingRow, tick, players, enemies)) {
         return;
     }
 
@@ -650,7 +724,7 @@ void DisengagePlayerCombat(PlayerState& player, ConnectedClient& client,
 
     const EnemyState* enemy = FindEnemyConst(enemies, player.targetId);
     if (enemy == nullptr) {
-        CancelPlayerCombat(player, client, enemies, tick);
+        CancelPlayerCombat(player, client, players, enemies, tick);
         return;
     }
 
@@ -663,7 +737,7 @@ void DisengagePlayerCombat(PlayerState& player, ConnectedClient& client,
 
     client.pendingAttackEnemyId = -1;
     ResetPlayerCombo(client);
-    BreakPlayerCombatLink(player, enemies, tick);
+    BreakPlayerCombatLink(player, players, enemies, tick);
     ClearPlayerMove(client, player);
 
     if (!inMelee) {
@@ -724,7 +798,8 @@ void TryApplyComboSwingDamage(PlayerState& player, ConnectedClient& client, Enem
 }
 
 void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
-                       std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
+                       std::vector<PlayerState>& players, std::vector<EnemyState>& enemies,
+                       const GridMap& map, uint32_t tick) {
     if (IsVoluntaryMove(client, player)) {
         return;
     }
@@ -733,13 +808,13 @@ void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
 
     EnemyState* enemy = FindEnemy(enemies, player.targetId);
     if (enemy == nullptr || !IsAlive(enemy->state)) {
-        CancelPlayerCombat(player, client, enemies, tick);
+        CancelPlayerCombat(player, client, players, enemies, tick);
         return;
     }
 
     if (!IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
-        if (!TryPathToCombatTarget(player, client, *enemy, map, tick)) {
-            CancelPlayerCombat(player, client, enemies, tick);
+        if (!TryPathToCombatTarget(player, client, *enemy, map, tick, players, enemies)) {
+            CancelPlayerCombat(player, client, players, enemies, tick);
         }
         return;
     }
@@ -888,7 +963,25 @@ void RespawnEnemy(int enemyId, std::vector<EnemyState>& enemies,
     InitializeGoblinMovement(enemyMovement[enemyId], map, *enemy, tick);
 }
 
+void RespawnAllDeadEnemies(std::vector<EnemyState>& enemies, std::vector<PlayerState>& players,
+                           std::unordered_map<int, ConnectedClient>& clients,
+                           std::unordered_map<int, EnemyMovementState>& enemyMovement,
+                           uint32_t tick) {
+    std::vector<int> deadIds;
+    deadIds.reserve(enemies.size());
+    for (const EnemyState& enemy : enemies) {
+        if (enemy.state == EntityState::Dead) {
+            deadIds.push_back(enemy.id);
+        }
+    }
+
+    for (int enemyId : deadIds) {
+        RespawnEnemy(enemyId, enemies, players, clients, enemyMovement, tick);
+    }
+}
+
 void TryCompletePendingEngage(ConnectedClient& client, PlayerState& player,
+                              std::vector<PlayerState>& players,
                               std::vector<EnemyState>& enemies, const GridMap& map,
                               uint32_t tick) {
     if (client.pendingAttackEnemyId < 0) {
@@ -900,7 +993,7 @@ void TryCompletePendingEngage(ConnectedClient& client, PlayerState& player,
 
     EnemyState* enemy = FindEnemy(enemies, enemyId);
     if (enemy == nullptr || !IsAlive(enemy->state)) {
-        EndPlayerCombat(player, enemies, tick);
+        EndPlayerCombat(player, players, enemies, tick);
         TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
                          EntityState::Idle, tick);
         return;
@@ -908,10 +1001,10 @@ void TryCompletePendingEngage(ConnectedClient& client, PlayerState& player,
 
     if (!IsInMeleeRange(player.x, player.y, enemy->x, enemy->y)) {
         client.pendingAttackEnemyId = enemyId;
-        if (TryPathToCombatTarget(player, client, *enemy, map, tick)) {
+        if (TryPathToCombatTarget(player, client, *enemy, map, tick, players, enemies)) {
             return;
         }
-        EndPlayerCombat(player, enemies, tick);
+        EndPlayerCombat(player, players, enemies, tick);
         TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
                          EntityState::Idle, tick);
         return;
@@ -920,7 +1013,9 @@ void TryCompletePendingEngage(ConnectedClient& client, PlayerState& player,
     BeginCombat(player, *enemy, client, tick, client.comboPhase != PlayerComboPhase::None);
 }
 
-bool StepPlayerMovement(PlayerState& player, ConnectedClient& client, uint32_t tick) {
+bool StepPlayerMovement(PlayerState& player, ConnectedClient& client, uint32_t tick,
+                        const std::vector<PlayerState>& players,
+                        const std::vector<EnemyState>& enemies) {
     if (!client.hasMoveTarget || client.pathIndex >= client.movePath.size()) {
         return false;
     }
@@ -931,8 +1026,15 @@ bool StepPlayerMovement(PlayerState& player, ConnectedClient& client, uint32_t t
 
     while (remainingStep > 0.0f && client.pathIndex < client.movePath.size()) {
         const auto& waypoint = client.movePath[client.pathIndex];
-        const float targetX = CellCenterX(waypoint.first);
-        const float targetY = CellCenterY(waypoint.second);
+        const int waypointCol = waypoint.first;
+        const int waypointRow = waypoint.second;
+        if (IsCellOccupied(waypointCol, waypointRow, players, enemies, player.id, -1)) {
+            ClearPlayerMove(client, player);
+            return moved;
+        }
+
+        const float targetX = CellCenterX(waypointCol);
+        const float targetY = CellCenterY(waypointRow);
         float dx = targetX - player.x;
         float dy = targetY - player.y;
         const float dist = std::sqrt(dx * dx + dy * dy);
@@ -973,7 +1075,8 @@ bool StepPlayerMovement(PlayerState& player, ConnectedClient& client, uint32_t t
 }
 
 void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
-                        std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
+                        std::vector<PlayerState>& players, std::vector<EnemyState>& enemies,
+                        const GridMap& map, uint32_t tick) {
     if (player.state == EntityState::Dead) {
         ClearPlayerMove(client, player);
         return;
@@ -981,13 +1084,13 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
 
     if (player.state == EntityState::Disengaging) {
         ClearPlayerMove(client, player);
-        UpdatePlayerDisengage(player, client, map, tick);
+        UpdatePlayerDisengage(player, client, map, tick, players, enemies);
         return;
     }
 
     if (IsVoluntaryMove(client, player)) {
         if (player.state == EntityState::Combat) {
-            BreakPlayerCombatLink(player, enemies, tick);
+            BreakPlayerCombatLink(player, players, enemies, tick);
         }
 
         const CombatStats& stats = DefaultEntityRegistry().StatsFor(kPlayerEntityId);
@@ -1014,7 +1117,7 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
                              EntityState::Moving, tick);
         }
 
-        StepPlayerMovement(player, client, tick);
+        StepPlayerMovement(player, client, tick, players, enemies);
         if (!client.hasMoveTarget && player.state == EntityState::Moving) {
             TransitionEntity(player.state, player.stateStartTick, player.anim, player.animStartTick,
                              EntityState::Idle, tick);
@@ -1030,16 +1133,16 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
                 TransitionEntity(player.state, player.stateStartTick, player.anim,
                                  player.animStartTick, EntityState::Dead, tick);
             } else {
-                RecoverPlayerAfterHit(player, client, enemies, map, tick);
+                RecoverPlayerAfterHit(player, client, players, enemies, map, tick);
             }
         }
         return;
     }
 
     if (player.state == EntityState::Moving || client.hasMoveTarget) {
-        StepPlayerMovement(player, client, tick);
+        StepPlayerMovement(player, client, tick, players, enemies);
         if (!client.hasMoveTarget) {
-            TryCompletePendingEngage(client, player, enemies, map, tick);
+            TryCompletePendingEngage(client, player, players, enemies, map, tick);
             if (player.state == EntityState::Moving) {
                 TransitionEntity(player.state, player.stateStartTick, player.anim,
                                  player.animStartTick, EntityState::Idle, tick);
@@ -1048,24 +1151,26 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
     }
 
     if (player.state == EntityState::Combat) {
-        UpdatePlayerCombo(player, client, enemies, map, tick);
+        UpdatePlayerCombo(player, client, players, enemies, map, tick);
     }
 }
 
-void RemoveExpiredEnemyCorpses(std::vector<EnemyState>& enemies,
-                               std::unordered_map<int, EnemyMovementState>& enemyMovement,
-                               uint32_t tick) {
-    enemies.erase(
-        std::remove_if(enemies.begin(), enemies.end(),
-                       [&](const EnemyState& enemy) {
-                           if (enemy.state != EntityState::Dead ||
-                               tick - enemy.stateStartTick < kGoblinCorpseLifetimeTicks) {
-                               return false;
-                           }
-                           enemyMovement.erase(enemy.id);
-                           return true;
-                       }),
-        enemies.end());
+void ProcessDeadEnemyRespawns(std::vector<EnemyState>& enemies, std::vector<PlayerState>& players,
+                              std::unordered_map<int, ConnectedClient>& clients,
+                              std::unordered_map<int, EnemyMovementState>& enemyMovement,
+                              uint32_t tick) {
+    std::vector<int> respawnIds;
+    respawnIds.reserve(enemies.size());
+    for (const EnemyState& enemy : enemies) {
+        if (enemy.state == EntityState::Dead &&
+            tick - enemy.stateStartTick >= kGoblinCorpseLifetimeTicks) {
+            respawnIds.push_back(enemy.id);
+        }
+    }
+
+    for (int enemyId : respawnIds) {
+        RespawnEnemy(enemyId, enemies, players, clients, enemyMovement, tick);
+    }
 }
 
 void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
@@ -1112,9 +1217,11 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
         const PlayerState* player = FindPlayerConst(players, enemy.targetId);
         if (player == nullptr || !IsAlive(player->state) ||
             !IsInMeleeRange(enemy.x, enemy.y, player->x, player->y)) {
-            enemy.targetId = -1;
-            TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
-                             EntityState::Idle, tick);
+            enemy.targetId = FindReplacementEnemyTarget(enemy, players);
+            if (enemy.targetId < 0) {
+                TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim, enemy.animStartTick,
+                                 EntityState::Idle, tick);
+            }
             return;
         }
 
@@ -1127,13 +1234,13 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
             if (IsInMeleeRange(enemy.x, enemy.y, aggroTarget->x, aggroTarget->y)) {
                 ClearEnemyMove(move);
                 ClearEnemyChase(move);
-                TryBeginGoblinCombat(enemy, *aggroTarget, clients, enemies, tick);
+                TryBeginGoblinCombat(enemy, *aggroTarget, players, clients, enemies, tick);
                 return;
             }
 
             if (!move.chasingPlayer || move.chaseTargetId != aggroTarget->id ||
                 !move.hasMoveTarget) {
-                StartGoblinChase(enemy, move, *aggroTarget, clients, enemies, map, tick);
+                StartGoblinChase(enemy, move, *aggroTarget, players, clients, enemies, map, tick);
             }
         } else if (move.chasingPlayer) {
             ClearEnemyChase(move);
@@ -1146,13 +1253,14 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
     }
 
     if (move.hasMoveTarget || enemy.state == EntityState::Moving) {
-        StepEnemyMovement(enemy, move);
+        StepEnemyMovement(enemy, move, players, enemies);
         if (!move.hasMoveTarget) {
             if (move.chasingPlayer && move.chaseTargetId >= 0) {
                 PlayerState* chaseTarget = FindPlayer(players, move.chaseTargetId);
                 if (chaseTarget != nullptr) {
                     SnapEntityToCellCenter(enemy.x, enemy.y);
-                    TryCompleteGoblinChase(enemy, move, *chaseTarget, clients, enemies, map, tick);
+                    TryCompleteGoblinChase(enemy, move, *chaseTarget, players, clients, enemies,
+                                           map, tick);
                 } else {
                     ClearEnemyChase(move);
                     TransitionEntity(enemy.state, enemy.stateStartTick, enemy.anim,
@@ -1167,11 +1275,12 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
 
     if (enemy.state == EntityState::Idle && !move.chasingPlayer && !move.hasMoveTarget &&
         !InPatrolIdle(move, tick)) {
-        StartNextPatrolLeg(enemy, move, map, enemies, tick);
+        StartNextPatrolLeg(enemy, move, map, players, enemies, tick);
     }
 }
 
 void HandlePlayerEngageRequest(PlayerState& player, ConnectedClient& client,
+                               std::vector<PlayerState>& players,
                                std::vector<EnemyState>& enemies, int enemyId,
                                const GridMap& map, uint32_t tick) {
     if (player.sceneId != SceneId::Arena || !CanAcceptAttackIntent(player.state)) {
@@ -1183,7 +1292,10 @@ void HandlePlayerEngageRequest(PlayerState& player, ConnectedClient& client,
         return;
     }
 
-    EndPlayerCombat(player, enemies, tick);
+    if (player.targetId >= 0 && player.targetId != enemyId) {
+        EndPlayerCombat(player, players, enemies, tick);
+    }
+
     ClearPlayerMove(client, player);
     client.pendingAttackEnemyId = enemyId;
     player.targetId = enemyId;
@@ -1198,15 +1310,16 @@ void HandlePlayerEngageRequest(PlayerState& player, ConnectedClient& client,
     const int playerRow = WorldToCellRow(player.y);
     const int enemyCol = WorldToCellCol(enemy->x);
     const int enemyRow = WorldToCellRow(enemy->y);
-    const std::optional<GridPoint> approach =
-        FindBestAdjacentApproachTile(map, playerCol, playerRow, enemyCol, enemyRow);
+    const std::optional<GridPoint> approach = FindBestAdjacentApproachTile(
+        map, playerCol, playerRow, enemyCol, enemyRow, &players, &enemies, player.id, enemyId);
     if (!approach.has_value()) {
         client.pendingAttackEnemyId = -1;
         player.targetId = -1;
         return;
     }
 
-    if (!StartPlayerPath(client, player, map, approach->first, approach->second, tick)) {
+    if (!StartPlayerPath(client, player, map, approach->first, approach->second, tick, players,
+                         enemies)) {
         client.pendingAttackEnemyId = -1;
         player.targetId = -1;
     }
@@ -1400,10 +1513,10 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
 
             ResetPlayerCombo(client);
             client.pendingAttackEnemyId = -1;
-            BreakPlayerCombatLink(*player, enemies_, tick_);
+            BreakPlayerCombatLink(*player, players_, enemies_, tick_);
             ClearPlayerMove(client, *player);
 
-            if (!StartPlayerPath(client, *player, map, col, row, tick_)) {
+            if (!StartPlayerPath(client, *player, map, col, row, tick_, players_, enemies_)) {
                 return;
             }
             break;
@@ -1419,7 +1532,7 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
                 return;
             }
 
-            HandlePlayerEngageRequest(*player, it->second, enemies_,
+            HandlePlayerEngageRequest(*player, it->second, players_, enemies_,
                                       incoming.message.attackRequest.enemyId,
                                       ArenaGridMap(), tick_);
             break;
@@ -1453,7 +1566,7 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
                 return;
             }
 
-            CancelPlayerCombat(*player, it->second, enemies_, tick_);
+            CancelPlayerCombat(*player, it->second, players_, enemies_, tick_);
             break;
         }
         case MessageType::DisengageRequest: {
@@ -1483,8 +1596,12 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
                 return;
             }
 
-            RespawnEnemy(incoming.message.respawnEnemyRequest.enemyId, enemies_, players_,
-                         clients_, enemyMovement_, tick_);
+            const int enemyId = incoming.message.respawnEnemyRequest.enemyId;
+            if (enemyId <= kRespawnAllDeadEnemiesId) {
+                RespawnAllDeadEnemies(enemies_, players_, clients_, enemyMovement_, tick_);
+            } else {
+                RespawnEnemy(enemyId, enemies_, players_, clients_, enemyMovement_, tick_);
+            }
             break;
         }
         case MessageType::Ping: {
@@ -1527,7 +1644,7 @@ void GameServer::HandleDisconnect(int clientId, TransportKind transport) {
     if (PlayerState* player = FindPlayer(players_, clientId)) {
         auto clientIt = clients_.find(clientId);
         if (clientIt != clients_.end()) {
-            CancelPlayerCombat(*player, clientIt->second, enemies_, tick_);
+            CancelPlayerCombat(*player, clientIt->second, players_, enemies_, tick_);
         }
         (void)player;
     }
@@ -1538,6 +1655,7 @@ void GameServer::HandleDisconnect(int clientId, TransportKind transport) {
         std::remove_if(players_.begin(), players_.end(),
                        [&](const PlayerState& player) { return player.id == clientId; }),
         players_.end());
+    BroadcastToAll(MakePlayerLeft(clientId));
     std::cout << "[game] client " << clientId << " removed\n";
 }
 
@@ -1551,7 +1669,17 @@ void GameServer::SimulateTick() {
         }
 
         const GridMap& map = MapForScene(player.sceneId);
-        UpdatePlayerEntity(player, clientIt->second, enemies_, map, tick_);
+        UpdatePlayerEntity(player, clientIt->second, players_, enemies_, map, tick_);
+
+        if (player.sceneId == SceneId::Arena && player.state != EntityState::Combat &&
+            player.state != EntityState::Hit && player.state != EntityState::Dead) {
+            const CombatStats& stats = DefaultEntityRegistry().StatsFor(kPlayerEntityId);
+            if (stats.shieldRegenPerTick > 0 && player.shield < stats.maxShield &&
+                tick_ % 4 == 0) {
+                player.shield =
+                    std::min(stats.maxShield, player.shield + stats.shieldRegenPerTick);
+            }
+        }
 
         if (player.state != EntityState::Dead) {
             const float margin = kPlayerRadius;
@@ -1567,7 +1695,7 @@ void GameServer::SimulateTick() {
                               arenaMap, tick_);
         }
 
-        RemoveExpiredEnemyCorpses(enemies_, enemyMovement_, tick_);
+        ProcessDeadEnemyRespawns(enemies_, players_, clients_, enemyMovement_, tick_);
     }
 }
 
@@ -1699,7 +1827,7 @@ void GameServer::ClearAllReady() {
 void GameServer::ResetPlayerForScene(PlayerState& player, ConnectedClient* client, SceneId scene,
                                      int spawnCol, int spawnRow) {
     if (client != nullptr) {
-        CancelPlayerCombat(player, *client, enemies_, tick_);
+        CancelPlayerCombat(player, *client, players_, enemies_, tick_);
         ResetPlayerCombo(*client);
         ClearPlayerMove(*client, player);
         ClearPlayerDisengage(*client);
