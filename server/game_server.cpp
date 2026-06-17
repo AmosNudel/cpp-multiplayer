@@ -1780,7 +1780,9 @@ SessionSnapshot GameServer::BuildSessionSnapshot() const {
     session.phaseEndsAtTick = sessionPhaseEndsAtTick_;
     session.allDeadReturnAtTick = allDeadReturnAtTick_;
     session.arenaJoinOpensAtTick = arenaJoinOpensAtTick_;
+    session.arenaSessionEndsAtTick = arenaSessionEndsAtTick_;
     session.hubPlayerCount = CountPlayersInScene(SceneId::Hub);
+    session.arenaPlayerCount = CountPlayersInScene(SceneId::Arena);
     for (const PlayerState& player : players_) {
         if (player.sceneId == SceneId::Hub && player.isReady) {
             session.readyPlayerIds.push_back(player.id);
@@ -1952,23 +1954,30 @@ void GameServer::StartArena() {
         ResetPlayerForScene(*player, client, SceneId::Arena, spawnCol, spawnRow);
     }
 
-    enemies_.clear();
-    enemyMovement_.clear();
-    enemies_ = CreateDefaultEnemies();
-    if (EnemiesShareTiles(enemies_)) {
-        std::cerr << "[game] warning: goblins spawned on shared tiles\n";
-    }
-    for (EnemyState& enemy : enemies_) {
-        enemy.stateStartTick = tick_;
-        enemy.animStartTick = tick_;
-        InitializeGoblinMovement(enemyMovement_[enemy.id], arenaMap, enemy, tick_);
+    const bool resumeExistingArena =
+        !enemies_.empty() && arenaSessionEndsAtTick_ > tick_;
+
+    if (!resumeExistingArena) {
+        enemies_.clear();
+        enemyMovement_.clear();
+        enemies_ = CreateDefaultEnemies();
+        if (EnemiesShareTiles(enemies_)) {
+            std::cerr << "[game] warning: goblins spawned on shared tiles\n";
+        }
+        for (EnemyState& enemy : enemies_) {
+            enemy.stateStartTick = tick_;
+            enemy.animStartTick = tick_;
+            InitializeGoblinMovement(enemyMovement_[enemy.id], arenaMap, enemy, tick_);
+        }
+        arenaSessionEndsAtTick_ = tick_ + kArenaDurationTicks;
     }
 
     sessionPhase_ = SessionPhase::ArenaActive;
-    sessionPhaseEndsAtTick_ = tick_ + kArenaDurationTicks;
+    sessionPhaseEndsAtTick_ = arenaSessionEndsAtTick_;
     arenaJoinOpensAtTick_ = tick_ + kArenaRejoinDelayTicks;
     allDeadReturnAtTick_ = 0;
-    std::cout << "[game] arena started with " << readyPlayerIds.size() << " players\n";
+    std::cout << "[game] arena " << (resumeExistingArena ? "resumed" : "started")
+              << " with " << readyPlayerIds.size() << " players\n";
 }
 
 void GameServer::EndArena() {
@@ -1994,6 +2003,7 @@ void GameServer::EndArena() {
     sessionPhaseEndsAtTick_ = 0;
     allDeadReturnAtTick_ = 0;
     arenaJoinOpensAtTick_ = 0;
+    arenaSessionEndsAtTick_ = 0;
     for (PlayerState& player : players_) {
         player.arenaRejoinAtTick = 0;
     }
@@ -2020,7 +2030,8 @@ void GameServer::HandleReturnToHub(int clientId) {
 }
 
 void GameServer::HandleSetReady(int clientId, bool ready) {
-    if (sessionPhase_ == SessionPhase::ArenaActive) {
+    if (sessionPhase_ == SessionPhase::ArenaActive &&
+        CountPlayersInScene(SceneId::Arena) > 0) {
         return;
     }
 
@@ -2053,6 +2064,18 @@ void GameServer::HandleSetReady(int clientId, bool ready) {
 }
 
 void GameServer::UpdateSession() {
+    if (arenaSessionEndsAtTick_ > 0 && tick_ >= arenaSessionEndsAtTick_) {
+        EndArena();
+        return;
+    }
+
+    if (sessionPhase_ == SessionPhase::ArenaActive &&
+        CountPlayersInScene(SceneId::Arena) == 0 && allDeadReturnAtTick_ == 0) {
+        sessionPhase_ = SessionPhase::Lobby;
+        sessionPhaseEndsAtTick_ = tick_ + kLobbyDurationTicks;
+        ClearAllReady();
+    }
+
     if (sessionPhase_ == SessionPhase::Lobby) {
         const int hubCount = CountPlayersInScene(SceneId::Hub);
         const int readyCount = CountReadyHubPlayers();
@@ -2081,12 +2104,6 @@ void GameServer::UpdateSession() {
                 sessionPhaseEndsAtTick_ = 0;
             }
         }
-        return;
-    }
-
-    if (sessionPhase_ == SessionPhase::ArenaActive && sessionPhaseEndsAtTick_ > 0 &&
-        tick_ >= sessionPhaseEndsAtTick_) {
-        EndArena();
         return;
     }
 

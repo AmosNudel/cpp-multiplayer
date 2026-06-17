@@ -440,9 +440,14 @@ static bool IsArenaWipePending() {
            session.allDeadReturnAtTick > gClient.GetServerTick();
 }
 
+static bool IsArenaSessionRunning() {
+    const net::SessionSnapshot& session = gClient.GetSession();
+    return session.arenaSessionEndsAtTick > gClient.GetServerTick();
+}
+
 static int ArenaRejoinSecondsLeft() {
     const net::SessionSnapshot& session = gClient.GetSession();
-    if (session.phase != net::SessionPhase::ArenaActive) {
+    if (session.phase != net::SessionPhase::ArenaActive || session.arenaPlayerCount == 0) {
         return 0;
     }
 
@@ -461,8 +466,10 @@ static int ArenaRejoinSecondsLeft() {
 }
 
 static bool CanLocalRejoinArena() {
+    const net::SessionSnapshot& session = gClient.GetSession();
     return GetLocalScene() == net::SceneId::Hub &&
-           gClient.GetSession().phase == net::SessionPhase::ArenaActive &&
+           session.phase == net::SessionPhase::ArenaActive &&
+           session.arenaPlayerCount > 0 &&
            ArenaRejoinSecondsLeft() == 0;
 }
 
@@ -477,10 +484,13 @@ static int ArenaWipeSecondsLeft() {
 
 static int ArenaSecondsLeft() {
     const net::SessionSnapshot& session = gClient.GetSession();
-    if (session.phaseEndsAtTick <= gClient.GetServerTick()) {
+    const uint32_t endsAt = session.arenaSessionEndsAtTick > 0
+                                ? session.arenaSessionEndsAtTick
+                                : session.phaseEndsAtTick;
+    if (endsAt <= gClient.GetServerTick()) {
         return 0;
     }
-    return static_cast<int>((session.phaseEndsAtTick - gClient.GetServerTick()) / net::kTickRate);
+    return static_cast<int>((endsAt - gClient.GetServerTick()) / net::kTickRate);
 }
 
 static std::vector<const net::PlayerState*> CollectSpectateTargets() {
@@ -839,7 +849,8 @@ static void UpdateStatusText() {
 
     const net::SessionSnapshot& session = gClient.GetSession();
     if (GetLocalScene() == net::SceneId::Hub &&
-        session.phase == net::SessionPhase::ArenaActive) {
+        session.phase == net::SessionPhase::ArenaActive &&
+        session.arenaPlayerCount > 0) {
         const int secondsLeft = ArenaSecondsLeft();
         const int rejoinSecondsLeft = ArenaRejoinSecondsLeft();
         if (rejoinSecondsLeft > 0) {
@@ -850,6 +861,32 @@ static void UpdateStatusText() {
             gStatusText = TextFormat(
                 "Hub - arena active (%d:%02d left), click portal to rejoin",
                 secondsLeft / 60, secondsLeft % 60);
+        }
+        return;
+    }
+
+    if (GetLocalScene() == net::SceneId::Hub && IsArenaSessionRunning()) {
+        const int secondsLeft = ArenaSecondsLeft();
+        if (session.phase == net::SessionPhase::Lobby) {
+            int lobbySecondsLeft = 0;
+            if (session.phaseEndsAtTick > gClient.GetServerTick()) {
+                lobbySecondsLeft = static_cast<int>(
+                    (session.phaseEndsAtTick - gClient.GetServerTick()) / net::kTickRate);
+            }
+            const int readyCount = static_cast<int>(session.readyPlayerIds.size());
+            gStatusText = TextFormat(
+                "Hub - arena paused (%d:%02d left), %d/%d ready, starting in %ds (click portal)",
+                secondsLeft / 60, secondsLeft % 60, readyCount, session.hubPlayerCount,
+                lobbySecondsLeft);
+            return;
+        }
+
+        if (const net::PlayerState* local = FindLocalPlayer(); local != nullptr && local->isReady) {
+            gStatusText = TextFormat("Hub - arena paused (%d:%02d left), ready (click portal to unready)",
+                                     secondsLeft / 60, secondsLeft % 60);
+        } else {
+            gStatusText = TextFormat("Hub - arena paused (%d:%02d left), click portal to ready up",
+                                     secondsLeft / 60, secondsLeft % 60);
         }
         return;
     }
@@ -1158,7 +1195,8 @@ static void HandleMapClick() {
     }
 
     if (GetLocalScene() == net::SceneId::Hub && net::IsPortalCell(col, row)) {
-        if (gClient.GetSession().phase == net::SessionPhase::ArenaActive) {
+        const net::SessionSnapshot& session = gClient.GetSession();
+        if (session.phase == net::SessionPhase::ArenaActive && session.arenaPlayerCount > 0) {
             if (CanLocalRejoinArena()) {
                 gClient.SendRejoinArena();
             }
