@@ -440,6 +440,32 @@ static bool IsArenaWipePending() {
            session.allDeadReturnAtTick > gClient.GetServerTick();
 }
 
+static int ArenaRejoinSecondsLeft() {
+    const net::SessionSnapshot& session = gClient.GetSession();
+    if (session.phase != net::SessionPhase::ArenaActive) {
+        return 0;
+    }
+
+    const net::PlayerState* local = FindLocalPlayer();
+    uint32_t opensAt = session.arenaJoinOpensAtTick;
+    if (local != nullptr && local->arenaRejoinAtTick > opensAt) {
+        opensAt = local->arenaRejoinAtTick;
+    }
+
+    const uint32_t tick = gClient.GetServerTick();
+    if (opensAt <= tick) {
+        return 0;
+    }
+
+    return static_cast<int>((opensAt - tick + net::kTickRate - 1) / net::kTickRate);
+}
+
+static bool CanLocalRejoinArena() {
+    return GetLocalScene() == net::SceneId::Hub &&
+           gClient.GetSession().phase == net::SessionPhase::ArenaActive &&
+           ArenaRejoinSecondsLeft() == 0;
+}
+
 static int ArenaWipeSecondsLeft() {
     const net::SessionSnapshot& session = gClient.GetSession();
     if (session.allDeadReturnAtTick <= gClient.GetServerTick()) {
@@ -815,8 +841,16 @@ static void UpdateStatusText() {
     if (GetLocalScene() == net::SceneId::Hub &&
         session.phase == net::SessionPhase::ArenaActive) {
         const int secondsLeft = ArenaSecondsLeft();
-        gStatusText = TextFormat("Hub - arena in progress (%d:%02d left, portal locked)",
-                                 secondsLeft / 60, secondsLeft % 60);
+        const int rejoinSecondsLeft = ArenaRejoinSecondsLeft();
+        if (rejoinSecondsLeft > 0) {
+            gStatusText = TextFormat(
+                "Hub - arena active (%d:%02d left), rejoin in %ds",
+                secondsLeft / 60, secondsLeft % 60, rejoinSecondsLeft);
+        } else {
+            gStatusText = TextFormat(
+                "Hub - arena active (%d:%02d left), click portal to rejoin",
+                secondsLeft / 60, secondsLeft % 60);
+        }
         return;
     }
 
@@ -1125,6 +1159,9 @@ static void HandleMapClick() {
 
     if (GetLocalScene() == net::SceneId::Hub && net::IsPortalCell(col, row)) {
         if (gClient.GetSession().phase == net::SessionPhase::ArenaActive) {
+            if (CanLocalRejoinArena()) {
+                gClient.SendRejoinArena();
+            }
             return;
         }
         const net::PlayerState* local = FindLocalPlayer();

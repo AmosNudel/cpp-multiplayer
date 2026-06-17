@@ -25,6 +25,7 @@ enum class MessageType {
     RespawnEnemyRequest,
     SetReadyRequest,
     ReturnToHubRequest,
+    RejoinArenaRequest,
     WorldState,
     PlayerLeft,
     Ping,
@@ -56,10 +57,13 @@ struct SetReadyRequest {
 
 struct ReturnToHubRequest {};
 
+struct RejoinArenaRequest {};
+
 struct SessionSnapshot {
     SessionPhase phase = SessionPhase::HubIdle;
     uint32_t phaseEndsAtTick = 0;
     uint32_t allDeadReturnAtTick = 0;
+    uint32_t arenaJoinOpensAtTick = 0;
     std::vector<int> readyPlayerIds;
     int hubPlayerCount = 0;
 };
@@ -81,6 +85,7 @@ struct PlayerState {
     int moveTargetRow = -1;
     SceneId sceneId = SceneId::Hub;
     bool isReady = false;
+    uint32_t arenaRejoinAtTick = 0;
 };
 
 struct JoinRequest {
@@ -140,6 +145,7 @@ struct Message {
     RespawnEnemyRequest respawnEnemyRequest;
     SetReadyRequest setReadyRequest;
     ReturnToHubRequest returnToHubRequest;
+    RejoinArenaRequest rejoinArenaRequest;
     WorldState worldState;
     PlayerLeft playerLeft;
     PingMessage ping;
@@ -163,6 +169,7 @@ Message MakeDisengageRequest();
 Message MakeRespawnEnemyRequest(int enemyId = kRespawnAllDeadEnemiesId);
 Message MakeSetReadyRequest(bool ready);
 Message MakeReturnToHubRequest();
+Message MakeRejoinArenaRequest();
 Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players,
                        const std::vector<EnemyState>& enemies,
                        const SessionSnapshot& session);

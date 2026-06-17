@@ -92,6 +92,9 @@ private:
     void UpdateSession();
     void HandleSetReady(int clientId, bool ready);
     void HandleReturnToHub(int clientId);
+    void HandleRejoinArena(int clientId);
+    void ReturnAllArenaPlayersToHub();
+    bool CanPlayerRejoinArena(const PlayerState& player) const;
     void StartArena();
     void EndArena();
     void BroadcastWorldState();
@@ -122,6 +125,7 @@ private:
     SessionPhase sessionPhase_ = SessionPhase::HubIdle;
     uint32_t sessionPhaseEndsAtTick_ = 0;
     uint32_t allDeadReturnAtTick_ = 0;
+    uint32_t arenaJoinOpensAtTick_ = 0;
     uint32_t tick_ = 0;
     bool running_ = false;
 };

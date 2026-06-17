@@ -1555,6 +1555,15 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             HandleReturnToHub(incoming.clientId);
             break;
         }
+        case MessageType::RejoinArenaRequest: {
+            auto it = clients_.find(incoming.clientId);
+            if (it == clients_.end() || !it->second.hasJoined) {
+                return;
+            }
+
+            HandleRejoinArena(incoming.clientId);
+            break;
+        }
         case MessageType::CancelCombatRequest: {
             auto it = clients_.find(incoming.clientId);
             if (it == clients_.end() || !it->second.hasJoined) {
@@ -1690,12 +1699,14 @@ void GameServer::SimulateTick() {
 
     if (sessionPhase_ == SessionPhase::ArenaActive) {
         const GridMap& arenaMap = ArenaGridMap();
-        for (EnemyState& enemy : enemies_) {
-            UpdateEnemyEntity(enemy, enemyMovement_[enemy.id], players_, clients_, enemies_,
-                              arenaMap, tick_);
-        }
+        if (CountPlayersInScene(SceneId::Arena) > 0) {
+            for (EnemyState& enemy : enemies_) {
+                UpdateEnemyEntity(enemy, enemyMovement_[enemy.id], players_, clients_, enemies_,
+                                  arenaMap, tick_);
+            }
 
-        ProcessDeadEnemyRespawns(enemies_, players_, clients_, enemyMovement_, tick_);
+            ProcessDeadEnemyRespawns(enemies_, players_, clients_, enemyMovement_, tick_);
+        }
     }
 }
 
@@ -1768,6 +1779,7 @@ SessionSnapshot GameServer::BuildSessionSnapshot() const {
     session.phase = sessionPhase_;
     session.phaseEndsAtTick = sessionPhaseEndsAtTick_;
     session.allDeadReturnAtTick = allDeadReturnAtTick_;
+    session.arenaJoinOpensAtTick = arenaJoinOpensAtTick_;
     session.hubPlayerCount = CountPlayersInScene(SceneId::Hub);
     for (const PlayerState& player : players_) {
         if (player.sceneId == SceneId::Hub && player.isReady) {
@@ -1849,6 +1861,69 @@ void GameServer::ResetPlayerForScene(PlayerState& player, ConnectedClient* clien
     player.anim = PlayerAnim::Idle;
     player.stateStartTick = tick_;
     player.animStartTick = tick_;
+    if (scene == SceneId::Arena) {
+        player.arenaRejoinAtTick = 0;
+    }
+}
+
+bool GameServer::CanPlayerRejoinArena(const PlayerState& player) const {
+    if (sessionPhase_ != SessionPhase::ArenaActive) {
+        return false;
+    }
+    if (player.sceneId != SceneId::Hub) {
+        return false;
+    }
+
+    const uint32_t opensAt =
+        std::max(arenaJoinOpensAtTick_, player.arenaRejoinAtTick);
+    return tick_ >= opensAt;
+}
+
+void GameServer::ReturnAllArenaPlayersToHub() {
+    const GridMap& hubMap = HubGridMap();
+    const int returningCount = CountPlayersInScene(SceneId::Arena);
+    if (returningCount <= 0) {
+        return;
+    }
+
+    const std::vector<std::pair<int, int>> spawnCells =
+        AllocateSpawnCells(hubMap, returningCount);
+    int spawnIndex = 0;
+
+    for (PlayerState& player : players_) {
+        if (player.sceneId != SceneId::Arena) {
+            continue;
+        }
+
+        ConnectedClient* client = FindClient(clients_, player.id);
+        const auto [spawnCol, spawnRow] = spawnCells[static_cast<size_t>(spawnIndex++)];
+        ResetPlayerForScene(player, client, SceneId::Hub, spawnCol, spawnRow);
+        player.arenaRejoinAtTick = tick_ + kArenaRejoinDelayTicks;
+    }
+}
+
+void GameServer::HandleRejoinArena(int clientId) {
+    if (sessionPhase_ != SessionPhase::ArenaActive) {
+        return;
+    }
+
+    PlayerState* player = FindPlayer(players_, clientId);
+    if (player == nullptr || player->sceneId != SceneId::Hub) {
+        return;
+    }
+
+    if (!CanPlayerRejoinArena(*player)) {
+        return;
+    }
+
+    const GridMap& arenaMap = ArenaGridMap();
+    const std::vector<std::pair<int, int>> spawnCells = AllocateSpawnCells(arenaMap, 1);
+    ConnectedClient* client = FindClient(clients_, player->id);
+    const auto [spawnCol, spawnRow] = spawnCells.front();
+    ResetPlayerForScene(*player, client, SceneId::Arena, spawnCol, spawnRow);
+    player->arenaRejoinAtTick = 0;
+    allDeadReturnAtTick_ = 0;
+    std::cout << "[game] player " << clientId << " rejoined arena\n";
 }
 
 void GameServer::StartArena() {
@@ -1891,6 +1966,7 @@ void GameServer::StartArena() {
 
     sessionPhase_ = SessionPhase::ArenaActive;
     sessionPhaseEndsAtTick_ = tick_ + kArenaDurationTicks;
+    arenaJoinOpensAtTick_ = tick_ + kArenaRejoinDelayTicks;
     allDeadReturnAtTick_ = 0;
     std::cout << "[game] arena started with " << readyPlayerIds.size() << " players\n";
 }
@@ -1917,6 +1993,10 @@ void GameServer::EndArena() {
     sessionPhase_ = SessionPhase::HubIdle;
     sessionPhaseEndsAtTick_ = 0;
     allDeadReturnAtTick_ = 0;
+    arenaJoinOpensAtTick_ = 0;
+    for (PlayerState& player : players_) {
+        player.arenaRejoinAtTick = 0;
+    }
     ClearAllReady();
     std::cout << "[game] arena ended, players returned to hub\n";
 }
@@ -1936,10 +2016,7 @@ void GameServer::HandleReturnToHub(int clientId) {
     ConnectedClient* client = FindClient(clients_, player->id);
     const auto [spawnCol, spawnRow] = spawnCells.front();
     ResetPlayerForScene(*player, client, SceneId::Hub, spawnCol, spawnRow);
-
-    if (CountPlayersInScene(SceneId::Arena) == 0) {
-        EndArena();
-    }
+    player->arenaRejoinAtTick = tick_ + kArenaRejoinDelayTicks;
 }
 
 void GameServer::HandleSetReady(int clientId, bool ready) {
@@ -2014,12 +2091,6 @@ void GameServer::UpdateSession() {
     }
 
     if (sessionPhase_ == SessionPhase::ArenaActive) {
-        const int arenaCount = CountPlayersInScene(SceneId::Arena);
-        if (arenaCount == 0) {
-            EndArena();
-            return;
-        }
-
         int aliveArenaCount = 0;
         for (const PlayerState& player : players_) {
             if (player.sceneId != SceneId::Arena) {
@@ -2030,12 +2101,13 @@ void GameServer::UpdateSession() {
             }
         }
 
-        if (aliveArenaCount == 0) {
+        if (aliveArenaCount == 0 && CountPlayersInScene(SceneId::Arena) > 0) {
             if (allDeadReturnAtTick_ == 0) {
                 allDeadReturnAtTick_ = tick_ + kAllDeadReturnTicks;
             }
             if (tick_ >= allDeadReturnAtTick_) {
-                EndArena();
+                ReturnAllArenaPlayersToHub();
+                allDeadReturnAtTick_ = 0;
             }
         } else {
             allDeadReturnAtTick_ = 0;
