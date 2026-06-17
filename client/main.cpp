@@ -822,9 +822,6 @@ static Vector2 DisplayPositionForEnemy(const net::EnemyState& enemy) {
     if (it != gEnemyVisuals.end()) {
         position = InterpolatedPosition(it->second);
     }
-    if (net::IsGoblinBoss(enemy)) {
-        position.y -= net::kGridCellSize * 0.5f;
-    }
     return position;
 }
 
@@ -856,7 +853,7 @@ static void DrawCombatTargetHighlights() {
         }
         const Vector2 pos = DisplayPositionForEnemy(enemy);
         const float highlightRadius =
-            net::IsGoblinBoss(enemy) ? net::kGridCellSize : net::kPlayerRadius + 10.0f;
+            net::IsGoblinBoss(enemy) ? net::kGridCellSize * 2.0f : net::kPlayerRadius + 10.0f;
         DrawCircleLines(pos.x, pos.y, highlightRadius, Color{255, 220, 80, 220});
         DrawCircleLines(pos.x, pos.y, highlightRadius + 2.0f, Color{255, 220, 80, 100});
     }

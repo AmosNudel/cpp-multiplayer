@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -8,8 +9,11 @@
 #include "common/config.hpp"
 #include "common/entity_state.hpp"
 #include "common/grid_map.hpp"
+#include "common/pathfinding.hpp"
 
 namespace net {
+
+struct PlayerState;
 
 inline constexpr int kGoblinIdleFrameCount = 4;
 inline constexpr int kGoblinIdleAnimTicksPerFrame = 3;
@@ -20,12 +24,13 @@ inline constexpr int kGoblinDeathFrameCount = 4;
 inline constexpr int kGoblinDeathAnimTicksPerFrame = 3;
 inline constexpr int kGoblinCorpseLifetimeTicks = 60;
 inline constexpr float kGoblinSpriteHeight = 128.0f;
-inline constexpr int kGoblinBossVerticalTiles = 2;
-inline constexpr float kGoblinBossSpriteHeight = kGoblinSpriteHeight * kGoblinBossVerticalTiles;
+inline constexpr int kGoblinBossTileCols = 4;
+inline constexpr int kGoblinBossTileRows = 4;
+inline constexpr float kGoblinBossSpriteHeight = kGoblinSpriteHeight * kGoblinBossTileRows;
 inline constexpr int kGoblinBossId = 100;
 inline constexpr int kGoblinBossVariantDamageNumerator = 5;
 inline constexpr int kGoblinBossVariantDamageDenominator = 4;
-inline constexpr int kGoblinBossStatMultiplier = 5;
+inline constexpr int kGoblinBossStatMultiplier = 3;
 inline constexpr int kDefaultGoblinCol = 7;
 inline constexpr int kDefaultGoblinRow = 7;
 inline constexpr int kDefaultGoblinId = 1;
@@ -75,6 +80,18 @@ bool AllRegularGoblinsDefeated(const std::vector<EnemyState>& enemies);
 bool HasGoblinBoss(const std::vector<EnemyState>& enemies);
 std::pair<int, int> PickGoblinBossSpawnCell(const GridMap& map,
                                             const std::vector<EnemyState>& enemies);
+std::pair<int, int> GoblinBossTopLeftFromCenter(int centerCol, int centerRow);
+std::pair<float, float> GoblinBossWorldCenterFromCenterCell(int centerCol, int centerRow);
+bool GoblinBossFitsAtTopLeft(int topLeftCol, int topLeftRow, const GridMap& map,
+                             const std::vector<PlayerState>& players,
+                             const std::vector<EnemyState>& enemies, int ignoreEnemyId = -1);
+bool GoblinBossFitsAtCenter(int centerCol, int centerRow, const GridMap& map,
+                            const std::vector<PlayerState>& players,
+                            const std::vector<EnemyState>& enemies, int ignoreEnemyId = -1);
+std::optional<GridPoint> FindBestBossChaseCenter(const GridMap& map, const EnemyState& boss,
+                                                 const PlayerState& player,
+                                                 const std::vector<PlayerState>& players,
+                                                 const std::vector<EnemyState>& enemies);
 
 inline int GoblinAnimFrameCount(PlayerAnim anim) {
     switch (anim) {

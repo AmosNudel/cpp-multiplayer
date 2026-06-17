@@ -234,7 +234,11 @@ void InitializeGoblinMovement(EnemyMovementState& move, const GridMap& map,
 bool StartEnemyPath(EnemyState& enemy, EnemyMovementState& move, const GridMap& map, int goalCol,
                     int goalRow, uint32_t tick, const std::vector<PlayerState>& players,
                     const std::vector<EnemyState>& enemies) {
-    if (IsCellOccupied(goalCol, goalRow, players, enemies, -1, enemy.id)) {
+    if (IsGoblinBoss(enemy)) {
+        if (!GoblinBossFitsAtCenter(goalCol, goalRow, map, players, enemies, enemy.id)) {
+            return false;
+        }
+    } else if (IsCellOccupied(goalCol, goalRow, players, enemies, -1, enemy.id)) {
         return false;
     }
 
@@ -265,7 +269,7 @@ bool StartEnemyPath(EnemyState& enemy, EnemyMovementState& move, const GridMap& 
     return true;
 }
 
-bool StepEnemyMovement(EnemyState& enemy, EnemyMovementState& move,
+bool StepEnemyMovement(EnemyState& enemy, EnemyMovementState& move, const GridMap& map,
                        const std::vector<PlayerState>& players,
                        const std::vector<EnemyState>& enemies) {
     if (!move.hasMoveTarget || move.pathIndex >= move.movePath.size()) {
@@ -280,13 +284,27 @@ bool StepEnemyMovement(EnemyState& enemy, EnemyMovementState& move,
         const auto& waypoint = move.movePath[move.pathIndex];
         const int waypointCol = waypoint.first;
         const int waypointRow = waypoint.second;
-        if (IsCellOccupied(waypointCol, waypointRow, players, enemies, -1, enemy.id)) {
+        if (IsGoblinBoss(enemy)) {
+            if (!GoblinBossFitsAtCenter(waypointCol, waypointRow, map, players, enemies, enemy.id)) {
+                ClearEnemyMove(move);
+                return moved;
+            }
+        } else if (IsCellOccupied(waypointCol, waypointRow, players, enemies, -1, enemy.id)) {
             ClearEnemyMove(move);
             return moved;
         }
 
-        const float targetX = CellCenterX(waypointCol);
-        const float targetY = CellCenterY(waypointRow);
+        float targetX = 0.0f;
+        float targetY = 0.0f;
+        if (IsGoblinBoss(enemy)) {
+            const auto [centerX, centerY] =
+                GoblinBossWorldCenterFromCenterCell(waypointCol, waypointRow);
+            targetX = centerX;
+            targetY = centerY;
+        } else {
+            targetX = CellCenterX(waypointCol);
+            targetY = CellCenterY(waypointRow);
+        }
         float dx = targetX - enemy.x;
         float dy = targetY - enemy.y;
         const float dist = std::sqrt(dx * dx + dy * dy);
@@ -621,10 +639,6 @@ bool StartGoblinChase(EnemyState& enemy, EnemyMovementState& move, PlayerState& 
                       std::vector<PlayerState>& players,
                       std::unordered_map<int, ConnectedClient>& clients,
                       std::vector<EnemyState>& enemies, const GridMap& map, uint32_t tick) {
-    if (IsGoblinBoss(enemy)) {
-        return false;
-    }
-
     ClearEnemyMove(move);
     move.chasingPlayer = true;
     move.chaseTargetId = player.id;
@@ -634,12 +648,17 @@ bool StartGoblinChase(EnemyState& enemy, EnemyMovementState& move, PlayerState& 
         return TryBeginGoblinCombat(enemy, player, players, clients, enemies, move, tick);
     }
 
-    const int enemyCol = WorldToCellCol(enemy.x);
-    const int enemyRow = WorldToCellRow(enemy.y);
-    const int playerCol = WorldToCellCol(player.x);
-    const int playerRow = WorldToCellRow(player.y);
-    const std::optional<GridPoint> approach = FindBestAdjacentApproachTile(
-        map, enemyCol, enemyRow, playerCol, playerRow, &players, &enemies, -1, enemy.id);
+    std::optional<GridPoint> approach;
+    if (IsGoblinBoss(enemy)) {
+        approach = FindBestBossChaseCenter(map, enemy, player, players, enemies);
+    } else {
+        const int enemyCol = WorldToCellCol(enemy.x);
+        const int enemyRow = WorldToCellRow(enemy.y);
+        const int playerCol = WorldToCellCol(player.x);
+        const int playerRow = WorldToCellRow(player.y);
+        approach = FindBestAdjacentApproachTile(map, enemyCol, enemyRow, playerCol, playerRow,
+                                                &players, &enemies, -1, enemy.id);
+    }
     if (!approach.has_value()) {
         ClearEnemyChase(move);
         return false;
@@ -1104,20 +1123,36 @@ void UpdateGoblinBossCombat(EnemyState& enemy, EnemyMovementState& move,
     StartBossComboCycle(enemy, move, tick);
 }
 
-void TrySpawnGoblinBoss(std::vector<EnemyState>& enemies,
+void TrySpawnGoblinBoss(std::vector<EnemyState>& enemies, std::vector<PlayerState>& players,
+                        std::unordered_map<int, ConnectedClient>& clients,
                         std::unordered_map<int, EnemyMovementState>& enemyMovement,
-                        uint32_t tick) {
+                        const GridMap& map, uint32_t tick) {
     if (HasGoblinBoss(enemies) || !AllRegularGoblinsDefeated(enemies)) {
         return;
     }
 
-    const GridMap& map = ArenaGridMap();
     const auto [spawnCol, spawnRow] = PickGoblinBossSpawnCell(map, enemies);
     EnemyState boss = CreateGoblinBossAt(kGoblinBossId, spawnCol, spawnRow);
     boss.stateStartTick = tick;
     boss.animStartTick = tick;
     enemies.push_back(boss);
-    enemyMovement[boss.id] = EnemyMovementState{};
+    EnemyState& spawnedBoss = enemies.back();
+    EnemyMovementState& move = enemyMovement[spawnedBoss.id];
+
+    std::vector<PlayerState*> targets;
+    targets.reserve(players.size());
+    for (PlayerState& player : players) {
+        if (player.sceneId == SceneId::Arena && IsAlive(player.state)) {
+            targets.push_back(&player);
+        }
+    }
+
+    if (!targets.empty()) {
+        static std::mt19937 bossTargetRng(std::random_device{}());
+        PlayerState& target = *targets[bossTargetRng() % targets.size()];
+        StartGoblinChase(spawnedBoss, move, target, players, clients, enemies, map, tick);
+    }
+
     std::cout << "[game] goblin boss spawned at (" << spawnCol << ", " << spawnRow << ")\n";
 }
 
@@ -1329,9 +1364,9 @@ void ProcessDeadEnemyRespawns(std::vector<EnemyState>& enemies, std::vector<Play
                               std::unordered_map<int, ConnectedClient>& clients,
                               std::unordered_map<int, EnemyMovementState>& enemyMovement,
                               uint32_t tick) {
-    (void)players;
-    (void)clients;
-    TrySpawnGoblinBoss(enemies, enemyMovement, tick);
+    (void)tick;
+    const GridMap& map = ArenaGridMap();
+    TrySpawnGoblinBoss(enemies, players, clients, enemyMovement, map, tick);
 }
 
 void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
@@ -1394,7 +1429,7 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
         return;
     }
 
-    if (!IsGoblinBoss(enemy) && !InPatrolIdle(move, tick)) {
+    if (IsGoblinBoss(enemy) || !InPatrolIdle(move, tick)) {
         if (PlayerState* aggroTarget = FindGoblinAggroTarget(enemy, players)) {
             if (IsPlayerInMeleeWithEnemy(aggroTarget->x, aggroTarget->y, enemy)) {
                 ClearEnemyMove(move);
@@ -1415,17 +1450,10 @@ void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
                                  enemy.animStartTick, EntityState::Idle, tick);
             }
         }
-    } else if (IsGoblinBoss(enemy)) {
-        if (PlayerState* aggroTarget = FindGoblinAggroTarget(enemy, players)) {
-            if (IsPlayerInMeleeWithEnemy(aggroTarget->x, aggroTarget->y, enemy)) {
-                TryBeginGoblinCombat(enemy, *aggroTarget, players, clients, enemies, move, tick);
-            }
-        }
-        return;
     }
 
-    if (!IsGoblinBoss(enemy) && (move.hasMoveTarget || enemy.state == EntityState::Moving)) {
-        StepEnemyMovement(enemy, move, players, enemies);
+    if (move.hasMoveTarget || enemy.state == EntityState::Moving) {
+        StepEnemyMovement(enemy, move, map, players, enemies);
         if (!move.hasMoveTarget) {
             if (move.chasingPlayer && move.chaseTargetId >= 0) {
                 PlayerState* chaseTarget = FindPlayer(players, move.chaseTargetId);
