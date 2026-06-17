@@ -34,6 +34,7 @@ public:
     void SendDisengage();
     void SendRespawnEnemy(int enemyId = net::kDefaultGoblinId);
     void SendSetReady(bool ready);
+    void SendReturnToHub();
     void SendChat(const std::string& text);
 
     ClientConnectionState GetState() const { return state_; }

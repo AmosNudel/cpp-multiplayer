@@ -9,6 +9,7 @@ struct WorldView {
     static constexpr float kMaxZoom = 2.5f;
 
     void Reset();
+    void SetTarget(Vector2 worldPos);
     void UpdateInput(Vector2 virtualMousePos, bool allowInput);
     Camera2D BuildCamera() const;
     Vector2 VirtualToWorld(Vector2 virtualPos) const;

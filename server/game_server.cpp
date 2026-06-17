@@ -1433,6 +1433,15 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             HandleSetReady(incoming.clientId, incoming.message.setReadyRequest.ready);
             break;
         }
+        case MessageType::ReturnToHubRequest: {
+            auto it = clients_.find(incoming.clientId);
+            if (it == clients_.end() || !it->second.hasJoined) {
+                return;
+            }
+
+            HandleReturnToHub(incoming.clientId);
+            break;
+        }
         case MessageType::CancelCombatRequest: {
             auto it = clients_.find(incoming.clientId);
             if (it == clients_.end() || !it->second.hasJoined) {
@@ -1630,6 +1639,7 @@ SessionSnapshot GameServer::BuildSessionSnapshot() const {
     SessionSnapshot session;
     session.phase = sessionPhase_;
     session.phaseEndsAtTick = sessionPhaseEndsAtTick_;
+    session.allDeadReturnAtTick = allDeadReturnAtTick_;
     session.hubPlayerCount = CountPlayersInScene(SceneId::Hub);
     for (const PlayerState& player : players_) {
         if (player.sceneId == SceneId::Hub && player.isReady) {
@@ -1753,6 +1763,7 @@ void GameServer::StartArena() {
 
     sessionPhase_ = SessionPhase::ArenaActive;
     sessionPhaseEndsAtTick_ = tick_ + kArenaDurationTicks;
+    allDeadReturnAtTick_ = 0;
     std::cout << "[game] arena started with " << readyPlayerIds.size() << " players\n";
 }
 
@@ -1777,8 +1788,27 @@ void GameServer::EndArena() {
     enemyMovement_.clear();
     sessionPhase_ = SessionPhase::HubIdle;
     sessionPhaseEndsAtTick_ = 0;
+    allDeadReturnAtTick_ = 0;
     ClearAllReady();
     std::cout << "[game] arena ended, players returned to hub\n";
+}
+
+void GameServer::HandleReturnToHub(int clientId) {
+    if (sessionPhase_ != SessionPhase::ArenaActive) {
+        return;
+    }
+
+    PlayerState* player = FindPlayer(players_, clientId);
+    if (player == nullptr || player->sceneId != SceneId::Arena ||
+        player->state != EntityState::Dead) {
+        return;
+    }
+
+    const GridMap& hubMap = HubGridMap();
+    const std::vector<std::pair<int, int>> spawnCells = AllocateSpawnCells(hubMap, 1);
+    ConnectedClient* client = FindClient(clients_, player->id);
+    const auto [spawnCol, spawnRow] = spawnCells.front();
+    ResetPlayerForScene(*player, client, SceneId::Hub, spawnCol, spawnRow);
 }
 
 void GameServer::HandleSetReady(int clientId, bool ready) {
@@ -1849,6 +1879,32 @@ void GameServer::UpdateSession() {
     if (sessionPhase_ == SessionPhase::ArenaActive && sessionPhaseEndsAtTick_ > 0 &&
         tick_ >= sessionPhaseEndsAtTick_) {
         EndArena();
+        return;
+    }
+
+    if (sessionPhase_ == SessionPhase::ArenaActive) {
+        int arenaCount = 0;
+        int aliveArenaCount = 0;
+        for (const PlayerState& player : players_) {
+            if (player.sceneId != SceneId::Arena) {
+                continue;
+            }
+            ++arenaCount;
+            if (IsAlive(player.state)) {
+                ++aliveArenaCount;
+            }
+        }
+
+        if (arenaCount > 0 && aliveArenaCount == 0) {
+            if (allDeadReturnAtTick_ == 0) {
+                allDeadReturnAtTick_ = tick_ + kAllDeadReturnTicks;
+            }
+            if (tick_ >= allDeadReturnAtTick_) {
+                EndArena();
+            }
+        } else {
+            allDeadReturnAtTick_ = 0;
+        }
     }
 }
 

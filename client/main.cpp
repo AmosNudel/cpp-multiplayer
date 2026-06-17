@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "client/connection_config.hpp"
 #include "client/game_client.hpp"
@@ -241,6 +242,11 @@ static bool gChatExpanded = false;
 static bool gOptionsOpen = false;
 #endif
 static Color gLocalColor = RAYWHITE;
+static bool gSpectating = false;
+static int gSpectateTargetId = -1;
+
+static void DrawUiButton(const char* label, Rectangle bounds, bool enabled = true);
+static bool WasUiButtonPressed(Rectangle bounds, bool enabled = true);
 
 static constexpr int kChatPanelX = 20;
 static constexpr int kChatPanelW = 420;
@@ -355,6 +361,293 @@ static bool IsLocalPlayerInCombat() {
     return false;
 }
 
+static const net::PlayerState* FindLocalPlayer() {
+    const int localPlayerId = gClient.GetLocalPlayerId();
+    for (const net::PlayerState& player : gClient.GetPlayers()) {
+        if (player.id == localPlayerId) {
+            return &player;
+        }
+    }
+    return nullptr;
+}
+
+static bool IsLocalPlayerDead() {
+    if (const net::PlayerState* local = FindLocalPlayer()) {
+        return local->state == net::EntityState::Dead;
+    }
+    return false;
+}
+
+static bool IsArenaWipePending() {
+    const net::SessionSnapshot& session = gClient.GetSession();
+    return session.phase == net::SessionPhase::ArenaActive &&
+           session.allDeadReturnAtTick > gClient.GetServerTick();
+}
+
+static int ArenaWipeSecondsLeft() {
+    const net::SessionSnapshot& session = gClient.GetSession();
+    if (session.allDeadReturnAtTick <= gClient.GetServerTick()) {
+        return 0;
+    }
+    return static_cast<int>((session.allDeadReturnAtTick - gClient.GetServerTick()) /
+                            net::kTickRate);
+}
+
+static int ArenaSecondsLeft() {
+    const net::SessionSnapshot& session = gClient.GetSession();
+    if (session.phaseEndsAtTick <= gClient.GetServerTick()) {
+        return 0;
+    }
+    return static_cast<int>((session.phaseEndsAtTick - gClient.GetServerTick()) / net::kTickRate);
+}
+
+static std::vector<const net::PlayerState*> CollectSpectateTargets() {
+    std::vector<const net::PlayerState*> targets;
+    targets.reserve(gClient.GetPlayers().size());
+    for (const net::PlayerState& player : gClient.GetPlayers()) {
+        if (player.state != net::EntityState::Dead) {
+            targets.push_back(&player);
+        }
+    }
+    std::sort(targets.begin(), targets.end(),
+              [](const net::PlayerState* a, const net::PlayerState* b) {
+                  return a->id < b->id;
+              });
+    return targets;
+}
+
+static const net::PlayerState* GetSpectateTarget() {
+    const std::vector<const net::PlayerState*> targets = CollectSpectateTargets();
+    if (targets.empty()) {
+        gSpectateTargetId = -1;
+        return nullptr;
+    }
+
+    if (gSpectateTargetId >= 0) {
+        for (const net::PlayerState* player : targets) {
+            if (player->id == gSpectateTargetId) {
+                return player;
+            }
+        }
+    }
+
+    gSpectateTargetId = targets.front()->id;
+    return targets.front();
+}
+
+static void CycleSpectateTarget(int direction) {
+    const std::vector<const net::PlayerState*> targets = CollectSpectateTargets();
+    if (targets.empty()) {
+        gSpectateTargetId = -1;
+        return;
+    }
+
+    int index = -1;
+    for (size_t i = 0; i < targets.size(); ++i) {
+        if (targets[i]->id == gSpectateTargetId) {
+            index = static_cast<int>(i);
+            break;
+        }
+    }
+
+    if (index < 0) {
+        index = direction >= 0 ? 0 : static_cast<int>(targets.size()) - 1;
+    } else {
+        const int count = static_cast<int>(targets.size());
+        index = ((index + direction) % count + count) % count;
+    }
+
+    gSpectateTargetId = targets[static_cast<size_t>(index)]->id;
+}
+
+static void SetSpectateTarget(int playerId) {
+    for (const net::PlayerState& player : gClient.GetPlayers()) {
+        if (player.id == playerId && player.state != net::EntityState::Dead) {
+            gSpectateTargetId = playerId;
+            return;
+        }
+    }
+}
+
+static int SpectateTargetIndex() {
+    const std::vector<const net::PlayerState*> targets = CollectSpectateTargets();
+    for (size_t i = 0; i < targets.size(); ++i) {
+        if (targets[i]->id == gSpectateTargetId) {
+            return static_cast<int>(i) + 1;
+        }
+    }
+    return 0;
+}
+
+static void UpdateSpectateCamera() {
+    if (!gSpectating || GetLocalScene() != net::SceneId::Arena || !IsLocalPlayerDead()) {
+        return;
+    }
+
+    if (const net::PlayerState* target = GetSpectateTarget()) {
+        gWorldView.SetTarget({target->x, target->y});
+    }
+}
+
+static void BeginSpectating() {
+    gSpectating = true;
+    gSpectateTargetId = -1;
+    UpdateSpectateCamera();
+}
+
+static void StopSpectating() {
+    gSpectating = false;
+    gSpectateTargetId = -1;
+}
+
+static Rectangle DeathPanelRect() {
+    const int panelW = 280;
+    const int panelH = 150;
+    return {
+        static_cast<float>((GameViewport::kVirtualWidth - panelW) / 2),
+        static_cast<float>((GameViewport::kVirtualHeight - panelH) / 2),
+        static_cast<float>(panelW),
+        static_cast<float>(panelH),
+    };
+}
+
+static Rectangle ReturnToHubButtonRect() {
+    const Rectangle panel = DeathPanelRect();
+    return {panel.x + 24.0f, panel.y + 72.0f, 108.0f, 36.0f};
+}
+
+static Rectangle SpectateButtonRect() {
+    const Rectangle panel = DeathPanelRect();
+    return {panel.x + 148.0f, panel.y + 72.0f, 108.0f, 36.0f};
+}
+
+static Rectangle SpectateReturnButtonRect() {
+    return {
+        static_cast<float>(GameViewport::kVirtualWidth - 168),
+        static_cast<float>(GameViewport::kHudHeight + 8),
+        148.0f,
+        32.0f,
+    };
+}
+
+static Rectangle SpectatePrevButtonRect() {
+    return {
+        static_cast<float>(GameViewport::kVirtualWidth - 248),
+        static_cast<float>(GameViewport::kHudHeight + 8),
+        36.0f,
+        32.0f,
+    };
+}
+
+static Rectangle SpectateNextButtonRect() {
+    return {
+        static_cast<float>(GameViewport::kVirtualWidth - 208),
+        static_cast<float>(GameViewport::kHudHeight + 8),
+        36.0f,
+        32.0f,
+    };
+}
+
+static bool ShouldShowDeathPanel() {
+    return gClient.GetState() == net::ClientConnectionState::Joined &&
+           GetLocalScene() == net::SceneId::Arena && IsLocalPlayerDead() && !IsArenaWipePending() &&
+           !gSpectating;
+}
+
+static void DrawDeathPanel() {
+    if (!ShouldShowDeathPanel()) {
+        return;
+    }
+
+    DrawRectangle(0, 0, GameViewport::kVirtualWidth, GameViewport::kVirtualHeight,
+                  Color{0, 0, 0, 100});
+
+    const Rectangle panel = DeathPanelRect();
+    DrawRectangleRec(panel, Color{28, 30, 38, 245});
+    DrawRectangleLinesEx(panel, 1.0f, Color{82, 88, 104, 255});
+    DrawText("You died", static_cast<int>(panel.x + 24), static_cast<int>(panel.y + 20), 24,
+             RAYWHITE);
+    DrawText("Return to hub or spectate teammates.", static_cast<int>(panel.x + 24),
+             static_cast<int>(panel.y + 48), 16, LIGHTGRAY);
+    DrawUiButton("Return to Hub", ReturnToHubButtonRect());
+    DrawUiButton("Spectate", SpectateButtonRect(), GetSpectateTarget() != nullptr);
+}
+
+static void DrawArenaWipeOverlay() {
+    if (gClient.GetState() != net::ClientConnectionState::Joined ||
+        GetLocalScene() != net::SceneId::Arena || !IsArenaWipePending()) {
+        return;
+    }
+
+    DrawRectangle(0, 0, GameViewport::kVirtualWidth, GameViewport::kVirtualHeight,
+                  Color{0, 0, 0, 120});
+
+    const int panelW = 360;
+    const int panelH = 90;
+    const int panelX = (GameViewport::kVirtualWidth - panelW) / 2;
+    const int panelY = (GameViewport::kVirtualHeight - panelH) / 2;
+    DrawRectangle(panelX, panelY, panelW, panelH, Color{28, 30, 38, 245});
+    DrawRectangleLines(panelX, panelY, panelW, panelH, Color{82, 88, 104, 255});
+    DrawText("Everyone is down", panelX + 24, panelY + 16, 22, RAYWHITE);
+    DrawText(TextFormat("Returning to hub in %ds...", ArenaWipeSecondsLeft()), panelX + 24,
+             panelY + 48, 18, LIGHTGRAY);
+}
+
+static net::SceneId GetLocalScene() {
+    if (const net::PlayerState* player = FindLocalPlayer()) {
+        return player->sceneId;
+    }
+    return net::SceneId::Hub;
+}
+
+static const net::GridMap& GetActiveMap() {
+    return GetLocalScene() == net::SceneId::Arena ? net::ArenaGridMap() : net::HubGridMap();
+}
+
+static void UpdateStatusText() {
+    if (gClient.GetState() != net::ClientConnectionState::Joined) {
+        return;
+    }
+
+    const net::SessionSnapshot& session = gClient.GetSession();
+    if (GetLocalScene() == net::SceneId::Hub &&
+        session.phase == net::SessionPhase::ArenaActive) {
+        const int secondsLeft = ArenaSecondsLeft();
+        gStatusText = TextFormat("Hub - arena in progress (%d:%02d left, portal locked)",
+                                 secondsLeft / 60, secondsLeft % 60);
+        return;
+    }
+
+    if (GetLocalScene() == net::SceneId::Arena) {
+        if (IsArenaWipePending()) {
+            gStatusText = TextFormat("Arena - returning to hub in %ds", ArenaWipeSecondsLeft());
+            return;
+        }
+
+        const int secondsLeft = ArenaSecondsLeft();
+        gStatusText = TextFormat("Arena - %d:%02d remaining", secondsLeft / 60, secondsLeft % 60);
+        return;
+    }
+
+    if (session.phase == net::SessionPhase::Lobby) {
+        int secondsLeft = 0;
+        if (session.phaseEndsAtTick > gClient.GetServerTick()) {
+            secondsLeft = static_cast<int>((session.phaseEndsAtTick - gClient.GetServerTick()) /
+                                           net::kTickRate);
+        }
+        const int readyCount = static_cast<int>(session.readyPlayerIds.size());
+        gStatusText = TextFormat("Hub - %d/%d ready, starting in %ds (click portal)",
+                                 readyCount, session.hubPlayerCount, secondsLeft);
+        return;
+    }
+
+    if (const net::PlayerState* local = FindLocalPlayer(); local != nullptr && local->isReady) {
+        gStatusText = "Hub - ready (click portal to unready)";
+    } else {
+        gStatusText = "Hub - click portal to ready up";
+    }
+}
+
 static bool IsMouseOverChatPanel(Vector2 virtualPos) {
     if (gEditingName) {
         return false;
@@ -390,9 +683,99 @@ static bool WasUiButtonPressed(Rectangle bounds, bool enabled = true) {
            IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
 
+static void DrawSpectateHud() {
+    if (!gSpectating || GetLocalScene() != net::SceneId::Arena || !IsLocalPlayerDead() ||
+        IsArenaWipePending()) {
+        return;
+    }
+
+    const std::vector<const net::PlayerState*> targets = CollectSpectateTargets();
+    const net::PlayerState* target = GetSpectateTarget();
+    const int targetIndex = SpectateTargetIndex();
+    const int targetCount = static_cast<int>(targets.size());
+    const bool canCycle = targetCount > 1;
+
+    if (target != nullptr) {
+        DrawText(TextFormat("Spectating: %s (%d/%d)", target->name.c_str(), targetIndex,
+                            targetCount),
+                 20, GameViewport::kHudHeight + 12, 16, LIGHTGRAY);
+    } else {
+        DrawText("Spectating", 20, GameViewport::kHudHeight + 12, 16, LIGHTGRAY);
+    }
+
+    DrawText("Tab = next   Shift+Tab = prev   click player = target", 20,
+             GameViewport::kHudHeight + 32, 14, GRAY);
+    DrawUiButton("<", SpectatePrevButtonRect(), canCycle);
+    DrawUiButton(">", SpectateNextButtonRect(), canCycle);
+    DrawUiButton("Return to Hub", SpectateReturnButtonRect());
+}
+
+static void HandleSpectateInput() {
+    if (!gSpectating || GetLocalScene() != net::SceneId::Arena || !IsLocalPlayerDead() ||
+        IsArenaWipePending() || gChatExpanded || gEditingName
+#if !defined(PLATFORM_WEB)
+        || gOptionsOpen
+#endif
+        ) {
+        return;
+    }
+
+    if (IsKeyPressed(KEY_TAB)) {
+        const bool reverse = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+        CycleSpectateTarget(reverse ? -1 : 1);
+        UpdateSpectateCamera();
+    }
+
+    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        return;
+    }
+
+    const Vector2 screenPos = GetMousePosition();
+    if (!gViewport.ContainsScreenPoint(screenPos)) {
+        return;
+    }
+
+    const Vector2 virtualPos = GetVirtualMousePosition();
+    if (IsMouseOverChatPanel(virtualPos) ||
+        CheckCollisionPointRec(virtualPos, SpectateReturnButtonRect()) ||
+        CheckCollisionPointRec(virtualPos, SpectatePrevButtonRect()) ||
+        CheckCollisionPointRec(virtualPos, SpectateNextButtonRect())) {
+        return;
+    }
+
+    if (!CheckCollisionPointRec(virtualPos, gWorldView.GridVirtualRect())) {
+        return;
+    }
+
+    const Vector2 world = gWorldView.VirtualToWorld(virtualPos);
+    const float pickRadius = net::kPlayerRadius * 1.75f;
+    const float pickRadiusSq = pickRadius * pickRadius;
+    const net::PlayerState* bestTarget = nullptr;
+    float bestDistSq = pickRadiusSq;
+
+    for (const net::PlayerState& player : gClient.GetPlayers()) {
+        if (player.state == net::EntityState::Dead) {
+            continue;
+        }
+
+        const float dx = player.x - world.x;
+        const float dy = player.y - world.y;
+        const float distSq = dx * dx + dy * dy;
+        if (distSq <= bestDistSq) {
+            bestDistSq = distSq;
+            bestTarget = &player;
+        }
+    }
+
+    if (bestTarget != nullptr) {
+        SetSpectateTarget(bestTarget->id);
+        UpdateSpectateCamera();
+    }
+}
+
 static void DrawRespawnGoblinButton() {
     if (gEditingName || gClient.GetState() != net::ClientConnectionState::Joined ||
-        GetLocalScene() != net::SceneId::Arena) {
+        GetLocalScene() != net::SceneId::Arena || IsLocalPlayerDead()) {
         return;
     }
 
@@ -400,7 +783,8 @@ static void DrawRespawnGoblinButton() {
 }
 
 static void DrawActionsPanel() {
-    if (gEditingName || gClient.GetState() != net::ClientConnectionState::Joined) {
+    if (gEditingName || gClient.GetState() != net::ClientConnectionState::Joined ||
+        IsLocalPlayerDead()) {
         return;
     }
 
@@ -436,68 +820,6 @@ static Color ColorForPlayer(int playerId) {
     return palette[playerId % 8];
 }
 
-static const net::PlayerState* FindLocalPlayer() {
-    const int localPlayerId = gClient.GetLocalPlayerId();
-    for (const net::PlayerState& player : gClient.GetPlayers()) {
-        if (player.id == localPlayerId) {
-            return &player;
-        }
-    }
-    return nullptr;
-}
-
-static net::SceneId GetLocalScene() {
-    if (const net::PlayerState* player = FindLocalPlayer()) {
-        return player->sceneId;
-    }
-    return net::SceneId::Hub;
-}
-
-static const net::GridMap& GetActiveMap() {
-    return GetLocalScene() == net::SceneId::Arena ? net::ArenaGridMap() : net::HubGridMap();
-}
-
-static void UpdateStatusText() {
-    if (gClient.GetState() != net::ClientConnectionState::Joined) {
-        return;
-    }
-
-    const net::SessionSnapshot& session = gClient.GetSession();
-    if (GetLocalScene() == net::SceneId::Hub &&
-        session.phase == net::SessionPhase::ArenaActive) {
-        gStatusText = "Hub - arena in progress, wait for round to end";
-        return;
-    }
-
-    if (GetLocalScene() == net::SceneId::Arena) {
-        int secondsLeft = 0;
-        if (session.phaseEndsAtTick > gClient.GetServerTick()) {
-            secondsLeft = static_cast<int>((session.phaseEndsAtTick - gClient.GetServerTick()) /
-                                           net::kTickRate);
-        }
-        gStatusText = TextFormat("Arena - %d:%02d remaining", secondsLeft / 60, secondsLeft % 60);
-        return;
-    }
-
-    if (session.phase == net::SessionPhase::Lobby) {
-        int secondsLeft = 0;
-        if (session.phaseEndsAtTick > gClient.GetServerTick()) {
-            secondsLeft = static_cast<int>((session.phaseEndsAtTick - gClient.GetServerTick()) /
-                                           net::kTickRate);
-        }
-        const int readyCount = static_cast<int>(session.readyPlayerIds.size());
-        gStatusText = TextFormat("Hub - %d/%d ready, starting in %ds (click portal)",
-                                 readyCount, session.hubPlayerCount, secondsLeft);
-        return;
-    }
-
-    if (const net::PlayerState* local = FindLocalPlayer(); local != nullptr && local->isReady) {
-        gStatusText = "Hub - ready (click portal to unready)";
-    } else {
-        gStatusText = "Hub - click portal to ready up";
-    }
-}
-
 static void OnConnectionState(net::ClientConnectionState state, const std::string& detail) {
     switch (state) {
         case net::ClientConnectionState::Disconnected:
@@ -505,6 +827,8 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
             gEditingName = true;
             gChatExpanded = false;
             gChatInput.clear();
+            gSpectating = false;
+            gSpectateTargetId = -1;
 #if !defined(PLATFORM_WEB)
             gOptionsOpen = false;
 #endif
@@ -517,6 +841,8 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
             gEditingName = false;
             gChatExpanded = false;
             gChatInput.clear();
+            gSpectating = false;
+            gSpectateTargetId = -1;
 #if !defined(PLATFORM_WEB)
             gOptionsOpen = false;
 #endif
@@ -603,6 +929,10 @@ static void HandleMapClick() {
         return;
     }
 
+    if (IsLocalPlayerDead()) {
+        return;
+    }
+
     if (!GetActiveMap().IsWalkable(col, row)) {
         return;
     }
@@ -654,6 +984,36 @@ static void HandleUiClicks() {
         WasUiButtonPressed(DisengageButtonRect(), IsLocalPlayerInCombat())) {
         gClient.SendDisengage();
         return;
+    }
+
+    if (gSpectating && GetLocalScene() == net::SceneId::Arena && IsLocalPlayerDead()) {
+        if (WasUiButtonPressed(SpectatePrevButtonRect(), CollectSpectateTargets().size() > 1)) {
+            CycleSpectateTarget(-1);
+            UpdateSpectateCamera();
+            return;
+        }
+        if (WasUiButtonPressed(SpectateNextButtonRect(), CollectSpectateTargets().size() > 1)) {
+            CycleSpectateTarget(1);
+            UpdateSpectateCamera();
+            return;
+        }
+        if (WasUiButtonPressed(SpectateReturnButtonRect())) {
+            StopSpectating();
+            gClient.SendReturnToHub();
+            return;
+        }
+    }
+
+    if (ShouldShowDeathPanel()) {
+        if (WasUiButtonPressed(ReturnToHubButtonRect())) {
+            StopSpectating();
+            gClient.SendReturnToHub();
+            return;
+        }
+        if (WasUiButtonPressed(SpectateButtonRect(), GetSpectateTarget() != nullptr)) {
+            BeginSpectating();
+            return;
+        }
     }
 }
 
@@ -790,10 +1150,21 @@ static void UpdateGame() {
     gClient.Update();
     UpdateStatusText();
 
+    if (GetLocalScene() != net::SceneId::Arena || !IsLocalPlayerDead()) {
+        StopSpectating();
+    }
+    UpdateSpectateCamera();
+    HandleSpectateInput();
+
     const Vector2 virtualMouse = GetVirtualMousePosition();
-    const bool allowCameraInput = !gEditingName && !gChatExpanded && !IsMouseOverActionsPanel(virtualMouse)
+    const bool blockGameplayInput =
+        ShouldShowDeathPanel() || IsArenaWipePending() ||
+        (gSpectating && GetLocalScene() == net::SceneId::Arena && IsLocalPlayerDead());
+    const bool allowCameraInput =
+        !gEditingName && !gChatExpanded && !IsMouseOverActionsPanel(virtualMouse) &&
+        !blockGameplayInput
 #if !defined(PLATFORM_WEB)
-                                  && !gOptionsOpen
+        && !gOptionsOpen
 #endif
         ;
     gWorldView.UpdateInput(virtualMouse, allowCameraInput);
@@ -854,7 +1225,9 @@ static void UpdateGame() {
 #endif
 
     HandleUiClicks();
-    HandleMapClick();
+    if (!blockGameplayInput) {
+        HandleMapClick();
+    }
 }
 
 static void DrawChatPanel() {
@@ -1037,6 +1410,15 @@ static void DrawGame() {
         DrawPlayerSprite(player, gLocalColor);
     }
 
+    if (gSpectating) {
+        if (const net::PlayerState* target = GetSpectateTarget()) {
+            DrawCircleLines(target->x, target->y, net::kPlayerRadius + 8.0f,
+                            Color{255, 220, 80, 255});
+            DrawCircleLines(target->x, target->y, net::kPlayerRadius + 10.0f,
+                            Color{255, 220, 80, 120});
+        }
+    }
+
     EndMode2D();
     EndScissorMode();
 
@@ -1081,6 +1463,10 @@ static void DrawGame() {
 #if !defined(PLATFORM_WEB)
     DrawOptionsPanel();
 #endif
+
+    DrawDeathPanel();
+    DrawSpectateHud();
+    DrawArenaWipeOverlay();
 
     gViewport.EndFrame();
 }

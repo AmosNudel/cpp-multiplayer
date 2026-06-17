@@ -10,6 +10,11 @@ void WorldView::Reset() {
     panning_ = false;
 }
 
+void WorldView::SetTarget(Vector2 worldPos) {
+    target_ = worldPos;
+    ClampTarget();
+}
+
 void WorldView::ClampTarget() {
     const float margin = 40.0f;
     target_.x = std::clamp(target_.x, margin, net::kWorldWidth - margin);

@@ -24,6 +24,7 @@ enum class MessageType {
     DisengageRequest,
     RespawnEnemyRequest,
     SetReadyRequest,
+    ReturnToHubRequest,
     WorldState,
     PlayerLeft,
     Ping,
@@ -53,9 +54,12 @@ struct SetReadyRequest {
     bool ready = true;
 };
 
+struct ReturnToHubRequest {};
+
 struct SessionSnapshot {
     SessionPhase phase = SessionPhase::HubIdle;
     uint32_t phaseEndsAtTick = 0;
+    uint32_t allDeadReturnAtTick = 0;
     std::vector<int> readyPlayerIds;
     int hubPlayerCount = 0;
 };
@@ -135,6 +139,7 @@ struct Message {
     DisengageRequest disengageRequest;
     RespawnEnemyRequest respawnEnemyRequest;
     SetReadyRequest setReadyRequest;
+    ReturnToHubRequest returnToHubRequest;
     WorldState worldState;
     PlayerLeft playerLeft;
     PingMessage ping;
@@ -157,6 +162,7 @@ Message MakeCancelCombatRequest();
 Message MakeDisengageRequest();
 Message MakeRespawnEnemyRequest(int enemyId = kDefaultGoblinId);
 Message MakeSetReadyRequest(bool ready);
+Message MakeReturnToHubRequest();
 Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players,
                        const std::vector<EnemyState>& enemies,
                        const SessionSnapshot& session);

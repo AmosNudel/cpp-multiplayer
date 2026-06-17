@@ -15,6 +15,7 @@ nlohmann::json SessionSnapshotToJson(const SessionSnapshot& session) {
     nlohmann::json json = {
         {"phase", SessionPhaseName(session.phase)},
         {"phase_ends_at_tick", session.phaseEndsAtTick},
+        {"all_dead_return_at_tick", session.allDeadReturnAtTick},
         {"hub_player_count", session.hubPlayerCount},
         {"ready_player_ids", nlohmann::json::array()},
     };
@@ -28,6 +29,7 @@ SessionSnapshot SessionSnapshotFromJson(const nlohmann::json& json) {
     SessionSnapshot session;
     session.phase = ParseSessionPhase(json.value("phase", "hub_idle"));
     session.phaseEndsAtTick = json.value("phase_ends_at_tick", 0u);
+    session.allDeadReturnAtTick = json.value("all_dead_return_at_tick", 0u);
     session.hubPlayerCount = json.value("hub_player_count", 0);
     if (json.contains("ready_player_ids")) {
         for (const auto& playerIdJson : json.at("ready_player_ids")) {
@@ -152,6 +154,7 @@ const char* MessageTypeName(MessageType type) {
         case MessageType::DisengageRequest: return "disengage_request";
         case MessageType::RespawnEnemyRequest: return "respawn_enemy_request";
         case MessageType::SetReadyRequest: return "set_ready_request";
+        case MessageType::ReturnToHubRequest: return "return_to_hub_request";
         case MessageType::WorldState: return "world_state";
         case MessageType::PlayerLeft: return "player_left";
         case MessageType::Ping: return "ping";
@@ -172,6 +175,7 @@ MessageType ParseMessageType(const std::string& value) {
     if (value == "disengage_request") return MessageType::DisengageRequest;
     if (value == "respawn_enemy_request") return MessageType::RespawnEnemyRequest;
     if (value == "set_ready_request") return MessageType::SetReadyRequest;
+    if (value == "return_to_hub_request") return MessageType::ReturnToHubRequest;
     if (value == "world_state") return MessageType::WorldState;
     if (value == "player_left") return MessageType::PlayerLeft;
     if (value == "ping") return MessageType::Ping;
@@ -245,6 +249,12 @@ Message MakeSetReadyRequest(bool ready) {
     Message message;
     message.type = MessageType::SetReadyRequest;
     message.setReadyRequest.ready = ready;
+    return message;
+}
+
+Message MakeReturnToHubRequest() {
+    Message message;
+    message.type = MessageType::ReturnToHubRequest;
     return message;
 }
 
@@ -345,6 +355,8 @@ std::string SerializeMessage(const Message& message) {
         case MessageType::SetReadyRequest:
             json["ready"] = message.setReadyRequest.ready;
             break;
+        case MessageType::ReturnToHubRequest:
+            break;
         case MessageType::WorldState:
             json["tick"] = message.worldState.tick;
             json["players"] = nlohmann::json::array();
@@ -426,6 +438,8 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
                 break;
             case MessageType::SetReadyRequest:
                 message.setReadyRequest.ready = json.value("ready", true);
+                break;
+            case MessageType::ReturnToHubRequest:
                 break;
             case MessageType::WorldState:
                 message.worldState.tick = json.at("tick").get<uint32_t>();
