@@ -1936,6 +1936,10 @@ void GameServer::HandleReturnToHub(int clientId) {
     ConnectedClient* client = FindClient(clients_, player->id);
     const auto [spawnCol, spawnRow] = spawnCells.front();
     ResetPlayerForScene(*player, client, SceneId::Hub, spawnCol, spawnRow);
+
+    if (CountPlayersInScene(SceneId::Arena) == 0) {
+        EndArena();
+    }
 }
 
 void GameServer::HandleSetReady(int clientId, bool ready) {
@@ -2010,19 +2014,23 @@ void GameServer::UpdateSession() {
     }
 
     if (sessionPhase_ == SessionPhase::ArenaActive) {
-        int arenaCount = 0;
+        const int arenaCount = CountPlayersInScene(SceneId::Arena);
+        if (arenaCount == 0) {
+            EndArena();
+            return;
+        }
+
         int aliveArenaCount = 0;
         for (const PlayerState& player : players_) {
             if (player.sceneId != SceneId::Arena) {
                 continue;
             }
-            ++arenaCount;
             if (IsAlive(player.state)) {
                 ++aliveArenaCount;
             }
         }
 
-        if (arenaCount > 0 && aliveArenaCount == 0) {
+        if (aliveArenaCount == 0) {
             if (allDeadReturnAtTick_ == 0) {
                 allDeadReturnAtTick_ = tick_ + kAllDeadReturnTicks;
             }

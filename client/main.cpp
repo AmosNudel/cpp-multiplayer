@@ -169,9 +169,7 @@ struct PlayerSprites {
 
     void Draw(const net::PlayerState& player, uint32_t serverTick, Vector2 center, Color tint,
               bool combatHitFlash = false) const {
-        if (player.state == net::EntityState::Dead) {
-            tint = Color{80, 80, 80, 160};
-        } else if (player.state == net::EntityState::Hit) {
+        if (player.state == net::EntityState::Hit) {
             tint = Color{255, 120, 120, 255};
         } else if (combatHitFlash) {
             tint = Color{

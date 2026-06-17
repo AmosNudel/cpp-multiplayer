@@ -36,8 +36,8 @@ inline constexpr int kHitFrameCount = 4;
 inline constexpr int kHitAnimTicksPerFrame = 2;
 inline constexpr int kJumpFrameCount = 5;
 inline constexpr int kJumpAnimTicksPerFrame = 2;
-inline constexpr int kDeadFrameCount = 1;
-inline constexpr int kDeadAnimTicksPerFrame = 1;
+inline constexpr int kDeadFrameCount = 13;
+inline constexpr int kDeadAnimTicksPerFrame = 3;
 inline constexpr int kMaxChatLength = 120;
 
 enum class PlayerAnim {
