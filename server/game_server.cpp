@@ -385,7 +385,7 @@ const EnemyState* FindEnemyConst(const std::vector<EnemyState>& enemies, int ene
     return nullptr;
 }
 
-void BreakPlayerCombatLink(PlayerState& player, std::vector<PlayerState>& players,
+void BreakPlayerCombatLink(PlayerState& player, const std::vector<PlayerState>& players,
                            std::vector<EnemyState>& enemies, uint32_t tick) {
     if (player.targetId >= 0) {
         if (EnemyState* enemy = FindEnemy(enemies, player.targetId)) {
@@ -402,7 +402,7 @@ void BreakPlayerCombatLink(PlayerState& player, std::vector<PlayerState>& player
     player.targetId = -1;
 }
 
-void EndPlayerCombat(PlayerState& player, std::vector<PlayerState>& players,
+void EndPlayerCombat(PlayerState& player, const std::vector<PlayerState>& players,
                      std::vector<EnemyState>& enemies, uint32_t tick) {
     BreakPlayerCombatLink(player, players, enemies, tick);
     if (IsAlive(player.state) && player.state == EntityState::Combat) {
@@ -649,8 +649,8 @@ void RecoverPlayerAfterHit(PlayerState& player, ConnectedClient& client,
 }
 
 void CancelPlayerCombat(PlayerState& player, ConnectedClient& client,
-                        std::vector<PlayerState>& players, std::vector<EnemyState>& enemies,
-                        uint32_t tick) {
+                        const std::vector<PlayerState>& players,
+                        std::vector<EnemyState>& enemies, uint32_t tick) {
     client.pendingAttackEnemyId = -1;
     ResetPlayerCombo(client);
     ClearPlayerMove(client, player);
