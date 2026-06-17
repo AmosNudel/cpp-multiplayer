@@ -20,6 +20,12 @@ inline constexpr int kGoblinDeathFrameCount = 4;
 inline constexpr int kGoblinDeathAnimTicksPerFrame = 3;
 inline constexpr int kGoblinCorpseLifetimeTicks = 60;
 inline constexpr float kGoblinSpriteHeight = 128.0f;
+inline constexpr int kGoblinBossVerticalTiles = 2;
+inline constexpr float kGoblinBossSpriteHeight = kGoblinSpriteHeight * kGoblinBossVerticalTiles;
+inline constexpr int kGoblinBossId = 100;
+inline constexpr int kGoblinBossVariantDamageNumerator = 5;
+inline constexpr int kGoblinBossVariantDamageDenominator = 4;
+inline constexpr int kGoblinBossStatMultiplier = 5;
 inline constexpr int kDefaultGoblinCol = 7;
 inline constexpr int kDefaultGoblinRow = 7;
 inline constexpr int kDefaultGoblinId = 1;
@@ -61,10 +67,20 @@ std::vector<std::pair<int, int>> BuildGoblinPatrolWaypoints(const GridMap& map, 
 std::vector<std::pair<int, int>> AllocateSpawnCells(const GridMap& map, int count);
 std::vector<EnemyState> CreateDefaultEnemies();
 EnemyState CreateGoblinAt(int id, int col, int row);
+EnemyState CreateGoblinBossAt(int id, int col, int row);
+bool IsGoblinBoss(const EnemyState& enemy);
+bool IsRegularGoblin(const EnemyState& enemy);
+std::vector<std::pair<int, int>> EnemyOccupiedCells(const EnemyState& enemy);
+bool AllRegularGoblinsDefeated(const std::vector<EnemyState>& enemies);
+bool HasGoblinBoss(const std::vector<EnemyState>& enemies);
+std::pair<int, int> PickGoblinBossSpawnCell(const GridMap& map,
+                                            const std::vector<EnemyState>& enemies);
 
 inline int GoblinAnimFrameCount(PlayerAnim anim) {
     switch (anim) {
-        case PlayerAnim::Attack1: return kGoblinAttackFrameCount;
+        case PlayerAnim::Attack1:
+        case PlayerAnim::Attack2:
+            return kGoblinAttackFrameCount;
         case PlayerAnim::Run: return kRunFrameCount;
         case PlayerAnim::Dead: return kGoblinDeathFrameCount;
         case PlayerAnim::Hit: return kHitFrameCount;
@@ -75,7 +91,9 @@ inline int GoblinAnimFrameCount(PlayerAnim anim) {
 
 inline int GoblinAnimTicksPerFrame(PlayerAnim anim) {
     switch (anim) {
-        case PlayerAnim::Attack1: return kGoblinAttackAnimTicksPerFrame;
+        case PlayerAnim::Attack1:
+        case PlayerAnim::Attack2:
+            return kGoblinAttackAnimTicksPerFrame;
         case PlayerAnim::Run: return kRunAnimTicksPerFrame;
         case PlayerAnim::Dead: return kGoblinDeathAnimTicksPerFrame;
         case PlayerAnim::Hit: return kHitAnimTicksPerFrame;
@@ -97,11 +115,16 @@ inline int GoblinAnimFrameIndex(PlayerAnim anim, uint32_t serverTick, uint32_t a
     }
 
     const int frame = static_cast<int>(elapsed / static_cast<uint32_t>(ticksPerFrame));
-    if (anim == PlayerAnim::Attack1 || anim == PlayerAnim::Dead || anim == PlayerAnim::Hit) {
+    if (anim == PlayerAnim::Attack1 || anim == PlayerAnim::Attack2 || anim == PlayerAnim::Dead ||
+        anim == PlayerAnim::Hit) {
         return frame >= frameCount ? frameCount - 1 : frame;
     }
 
     return static_cast<int>(frame % static_cast<uint32_t>(frameCount));
+}
+
+inline PlayerAnim GoblinAttackAnimForVariant(int variant) {
+    return variant == 2 ? PlayerAnim::Attack2 : PlayerAnim::Attack1;
 }
 
 inline bool GoblinAnimFinished(PlayerAnim anim, uint32_t tick, uint32_t animStartTick) {

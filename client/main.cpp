@@ -45,6 +45,8 @@ static const char* kDeathSpritePath =
 static const char* kGoblinIdleSpritePath = "assets/enemy/Goblin/Idle.png";
 static const char* kGoblinRunSpritePath = "assets/enemy/Goblin/Run.png";
 static const char* kGoblinAttackSpritePath = "assets/enemy/Goblin/Attack.png";
+static const char* kGoblinAttackVariantSpritePath =
+    "assets/enemy/attack_variant1/Goblin/Attack2.png";
 static const char* kGoblinHitSpritePath = "assets/enemy/Goblin/Take Hit.png";
 static const char* kGoblinDeathSpritePath = "assets/enemy/Goblin/Death.png";
 static const float kPlayerSpriteHeight = 96.0f;
@@ -196,6 +198,7 @@ struct GoblinSprites {
     SpriteSheet idle;
     SpriteSheet run;
     SpriteSheet attack;
+    SpriteSheet attackVariant;
     SpriteSheet hit;
     SpriteSheet death;
 
@@ -204,6 +207,8 @@ struct GoblinSprites {
         run.Load(ResolveAssetPath(kGoblinRunSpritePath).c_str(), net::kRunFrameCount);
         attack.Load(ResolveAssetPath(kGoblinAttackSpritePath).c_str(),
                     net::kGoblinAttackFrameCount);
+        attackVariant.Load(ResolveAssetPath(kGoblinAttackVariantSpritePath).c_str(),
+                           net::kGoblinAttackFrameCount);
         hit.Load(ResolveAssetPath(kGoblinHitSpritePath).c_str(), net::kHitFrameCount);
         death.Load(ResolveAssetPath(kGoblinDeathSpritePath).c_str(), net::kGoblinDeathFrameCount);
     }
@@ -212,15 +217,21 @@ struct GoblinSprites {
         idle.Unload();
         run.Unload();
         attack.Unload();
+        attackVariant.Unload();
         hit.Unload();
         death.Unload();
     }
 
     bool Loaded() const { return idle.loaded; }
 
-    const SpriteSheet* SheetForAnim(net::PlayerAnim anim) const {
+    const SpriteSheet* SheetForAnim(net::PlayerAnim anim, bool useAttackVariant) const {
         switch (anim) {
-            case net::PlayerAnim::Attack1: return attack.loaded ? &attack : nullptr;
+            case net::PlayerAnim::Attack1:
+                return attack.loaded ? &attack : nullptr;
+            case net::PlayerAnim::Attack2:
+                return useAttackVariant && attackVariant.loaded
+                           ? &attackVariant
+                           : (attack.loaded ? &attack : nullptr);
             case net::PlayerAnim::Run: return run.loaded ? &run : nullptr;
             case net::PlayerAnim::Hit: return hit.loaded ? &hit : nullptr;
             case net::PlayerAnim::Dead: return death.loaded ? &death : nullptr;
@@ -243,14 +254,17 @@ struct GoblinSprites {
             return;
         }
 
+        const bool isBoss = net::IsGoblinBoss(enemy);
+        const float spriteHeight =
+            isBoss ? net::kGoblinBossSpriteHeight : net::kGoblinSpriteHeight;
         const int frame =
             net::GoblinAnimFrameIndex(enemy.anim, serverTick, enemy.animStartTick);
-        if (const SpriteSheet* sheet = SheetForAnim(enemy.anim)) {
-            sheet->Draw(center, tint, frame, enemy.facingRight, net::kGoblinSpriteHeight);
+        if (const SpriteSheet* sheet = SheetForAnim(enemy.anim, isBoss)) {
+            sheet->Draw(center, tint, frame, enemy.facingRight, spriteHeight);
             return;
         }
 
-        idle.Draw(center, tint, frame, enemy.facingRight, net::kGoblinSpriteHeight);
+        idle.Draw(center, tint, frame, enemy.facingRight, spriteHeight);
     }
 };
 
@@ -803,11 +817,15 @@ static Vector2 DisplayPositionForPlayer(const net::PlayerState& player) {
 }
 
 static Vector2 DisplayPositionForEnemy(const net::EnemyState& enemy) {
+    Vector2 position = {enemy.x, enemy.y};
     const auto it = gEnemyVisuals.find(enemy.id);
-    if (it == gEnemyVisuals.end()) {
-        return {enemy.x, enemy.y};
+    if (it != gEnemyVisuals.end()) {
+        position = InterpolatedPosition(it->second);
     }
-    return InterpolatedPosition(it->second);
+    if (net::IsGoblinBoss(enemy)) {
+        position.y -= net::kGridCellSize * 0.5f;
+    }
+    return position;
 }
 
 static bool IsCombatHitFlashing(const EntityVisualState* visual) {
@@ -837,8 +855,10 @@ static void DrawCombatTargetHighlights() {
             continue;
         }
         const Vector2 pos = DisplayPositionForEnemy(enemy);
-        DrawCircleLines(pos.x, pos.y, net::kPlayerRadius + 10.0f, Color{255, 220, 80, 220});
-        DrawCircleLines(pos.x, pos.y, net::kPlayerRadius + 12.0f, Color{255, 220, 80, 100});
+        const float highlightRadius =
+            net::IsGoblinBoss(enemy) ? net::kGridCellSize : net::kPlayerRadius + 10.0f;
+        DrawCircleLines(pos.x, pos.y, highlightRadius, Color{255, 220, 80, 220});
+        DrawCircleLines(pos.x, pos.y, highlightRadius + 2.0f, Color{255, 220, 80, 100});
     }
 }
 
@@ -1165,8 +1185,10 @@ static std::optional<int> FindEnemyAtCell(int col, int row) {
         if (enemy.state == net::EntityState::Dead) {
             continue;
         }
-        if (net::WorldToCellCol(enemy.x) == col && net::WorldToCellRow(enemy.y) == row) {
-            return enemy.id;
+        for (const std::pair<int, int>& cell : net::EnemyOccupiedCells(enemy)) {
+            if (cell.first == col && cell.second == row) {
+                return enemy.id;
+            }
         }
     }
     return std::nullopt;
@@ -1727,7 +1749,7 @@ static void DrawEnemy(const net::EnemyState& enemy) {
 
 static void DrawEnemies() {
     for (const net::EnemyState& enemy : gClient.GetEnemies()) {
-        if (enemy.kind == net::kGoblinEntityId) {
+        if (enemy.kind == net::kGoblinEntityId || enemy.kind == net::kGoblinBossEntityId) {
             DrawEnemy(enemy);
         }
     }

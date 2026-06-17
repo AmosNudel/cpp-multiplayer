@@ -24,8 +24,10 @@ bool IsCellOccupiedByEnemy(int col, int row, const std::vector<EnemyState>& enem
         if (enemy.id == excludeEnemyId || !IsAlive(enemy.state)) {
             continue;
         }
-        if (WorldToCellCol(enemy.x) == col && WorldToCellRow(enemy.y) == row) {
-            return true;
+        for (const std::pair<int, int>& cell : EnemyOccupiedCells(enemy)) {
+            if (cell.first == col && cell.second == row) {
+                return true;
+            }
         }
     }
     return false;
@@ -106,14 +108,18 @@ bool EnemiesShareTiles(const std::vector<EnemyState>& enemies) {
         if (!IsAlive(enemies[i].state)) {
             continue;
         }
-        const int colA = WorldToCellCol(enemies[i].x);
-        const int rowA = WorldToCellRow(enemies[i].y);
+        const std::vector<std::pair<int, int>> cellsA = EnemyOccupiedCells(enemies[i]);
         for (size_t j = i + 1; j < enemies.size(); ++j) {
             if (!IsAlive(enemies[j].state)) {
                 continue;
             }
-            if (colA == WorldToCellCol(enemies[j].x) && rowA == WorldToCellRow(enemies[j].y)) {
-                return true;
+            const std::vector<std::pair<int, int>> cellsB = EnemyOccupiedCells(enemies[j]);
+            for (const std::pair<int, int>& cellA : cellsA) {
+                for (const std::pair<int, int>& cellB : cellsB) {
+                    if (cellA.first == cellB.first && cellA.second == cellB.second) {
+                        return true;
+                    }
+                }
             }
         }
     }
@@ -293,6 +299,104 @@ std::vector<EnemyState> CreateDefaultEnemies() {
     }
 
     return enemies;
+}
+
+bool IsGoblinBoss(const EnemyState& enemy) {
+    return enemy.kind == kGoblinBossEntityId;
+}
+
+bool IsRegularGoblin(const EnemyState& enemy) {
+    return enemy.kind == kGoblinEntityId;
+}
+
+std::vector<std::pair<int, int>> EnemyOccupiedCells(const EnemyState& enemy) {
+    const int anchorCol = WorldToCellCol(enemy.x);
+    const int anchorRow = WorldToCellRow(enemy.y);
+    std::vector<std::pair<int, int>> cells;
+    cells.emplace_back(anchorCol, anchorRow);
+    if (IsGoblinBoss(enemy)) {
+        const int topRow = anchorRow - (kGoblinBossVerticalTiles - 1);
+        if (topRow != anchorRow) {
+            cells.emplace_back(anchorCol, topRow);
+        }
+    }
+    return cells;
+}
+
+bool AllRegularGoblinsDefeated(const std::vector<EnemyState>& enemies) {
+    bool foundRegularGoblin = false;
+    for (const EnemyState& enemy : enemies) {
+        if (!IsRegularGoblin(enemy)) {
+            continue;
+        }
+        foundRegularGoblin = true;
+        if (enemy.state != EntityState::Dead) {
+            return false;
+        }
+    }
+    return foundRegularGoblin;
+}
+
+bool HasGoblinBoss(const std::vector<EnemyState>& enemies) {
+    for (const EnemyState& enemy : enemies) {
+        if (IsGoblinBoss(enemy)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsValidGoblinBossSpawnCell(int col, int row, const GridMap& map,
+                                const std::vector<EnemyState>& enemies) {
+    for (int tileOffset = 0; tileOffset < kGoblinBossVerticalTiles; ++tileOffset) {
+        const int occupiedRow = row - tileOffset;
+        if (!IsValidCell(col, occupiedRow) || !map.IsWalkable(col, occupiedRow)) {
+            return false;
+        }
+        if (IsCellOccupiedByEnemy(col, occupiedRow, enemies, -1)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::pair<int, int> PickGoblinBossSpawnCell(const GridMap& map,
+                                            const std::vector<EnemyState>& enemies) {
+    const auto [centerCol, centerRow] = ResolvePlayerSpawnCell(map);
+    std::vector<std::pair<int, int>> candidates;
+    for (int row = 1; row < kGridRows - 1; ++row) {
+        for (int col = 1; col < kGridCols - 1; ++col) {
+            if (IsValidGoblinBossSpawnCell(col, row, map, enemies)) {
+                candidates.emplace_back(col, row);
+            }
+        }
+    }
+
+    if (candidates.empty()) {
+        return {centerCol, centerRow};
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+              [centerCol, centerRow](const std::pair<int, int>& a,
+                                     const std::pair<int, int>& b) {
+                  const int distA = ManhattanCellDistance(a.first, a.second, centerCol, centerRow);
+                  const int distB = ManhattanCellDistance(b.first, b.second, centerCol, centerRow);
+                  return distA < distB;
+              });
+    return candidates.front();
+}
+
+EnemyState CreateGoblinBossAt(int id, int col, int row) {
+    EnemyState boss;
+    boss.id = id;
+    boss.kind = kGoblinBossEntityId;
+    boss.x = CellCenterX(col);
+    boss.y = CellCenterY(row);
+    boss.state = EntityState::Idle;
+    boss.anim = PlayerAnim::Idle;
+    boss.hp = DefaultEntityRegistry().StatsFor(kGoblinBossEntityId).maxHp;
+    boss.facingRight = false;
+    return boss;
 }
 
 }  // namespace net

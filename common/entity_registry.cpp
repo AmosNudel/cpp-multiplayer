@@ -7,6 +7,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "common/enemies.hpp"
+
 namespace net {
 namespace {
 
@@ -60,6 +62,20 @@ void EntityRegistry::RegisterDefaults() {
         goblin.stats.hitStunTicks = 6;
         goblin.spriteHeight = 128.0f;
         Register(goblin);
+    }
+
+    if (Find(kGoblinBossEntityId) == nullptr) {
+        const CombatStats& goblinStats = StatsFor(kGoblinEntityId);
+        EntityDef boss;
+        boss.id = kGoblinBossEntityId;
+        boss.displayName = "Goblin Boss";
+        boss.stats.maxHp = goblinStats.maxHp * kGoblinBossStatMultiplier;
+        boss.stats.attackDamage = goblinStats.attackDamage * kGoblinBossStatMultiplier;
+        boss.stats.critDamageMultiplier = goblinStats.critDamageMultiplier;
+        boss.stats.attackCooldownTicks = goblinStats.attackCooldownTicks;
+        boss.stats.hitStunTicks = goblinStats.hitStunTicks;
+        boss.spriteHeight = kGoblinBossSpriteHeight;
+        Register(boss);
     }
 }
 

@@ -7,6 +7,7 @@ namespace net {
 
 inline constexpr const char* kPlayerEntityId = "player";
 inline constexpr const char* kGoblinEntityId = "goblin";
+inline constexpr const char* kGoblinBossEntityId = "goblin_boss";
 
 struct CombatStats {
     int maxHp = 100;

@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <limits>
+#include <unordered_set>
 
 #include "common/grid.hpp"
 
@@ -17,6 +18,55 @@ bool IsInMeleeRange(float ax, float ay, float bx, float by) {
     const int colB = WorldToCellCol(bx);
     const int rowB = WorldToCellRow(by);
     return ManhattanCellDistance(colA, rowA, colB, rowB) == 1;
+}
+
+bool EnemyOccupiesCell(const EnemyState& enemy, int col, int row) {
+    for (const std::pair<int, int>& cell : EnemyOccupiedCells(enemy)) {
+        if (cell.first == col && cell.second == row) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsInMeleeRangeWithEnemy(float ax, float ay, const EnemyState& enemy) {
+    const int playerCol = WorldToCellCol(ax);
+    const int playerRow = WorldToCellRow(ay);
+    for (const std::pair<int, int>& cell : EnemyOccupiedCells(enemy)) {
+        if (ManhattanCellDistance(playerCol, playerRow, cell.first, cell.second) == 1) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<std::pair<int, int>> CollectAdjacentCellsAroundEnemy(const EnemyState& enemy) {
+    static constexpr int kDirections[4][2] = {
+        {1, 0},
+        {-1, 0},
+        {0, 1},
+        {0, -1},
+    };
+
+    std::vector<std::pair<int, int>> adjacent;
+    std::unordered_set<int> seen;
+    for (const std::pair<int, int>& occupied : EnemyOccupiedCells(enemy)) {
+        for (const auto& direction : kDirections) {
+            const int neighborCol = occupied.first + direction[0];
+            const int neighborRow = occupied.second + direction[1];
+            if (!IsValidCell(neighborCol, neighborRow)) {
+                continue;
+            }
+            if (EnemyOccupiesCell(enemy, neighborCol, neighborRow)) {
+                continue;
+            }
+            const int key = neighborCol * kGridRows + neighborRow;
+            if (seen.insert(key).second) {
+                adjacent.emplace_back(neighborCol, neighborRow);
+            }
+        }
+    }
+    return adjacent;
 }
 
 void SnapEntityToCellCenter(float& x, float& y) {
@@ -40,7 +90,7 @@ bool IsCellOccupied(int col, int row, const std::vector<PlayerState>& players,
         if (enemy.id == ignoreEnemyId || !IsAlive(enemy.state)) {
             continue;
         }
-        if (WorldToCellCol(enemy.x) == col && WorldToCellRow(enemy.y) == row) {
+        if (EnemyOccupiesCell(enemy, col, row)) {
             return true;
         }
     }
@@ -104,6 +154,68 @@ std::optional<GridPoint> FindBestAdjacentApproachTile(const GridMap& map, int st
             bestPathLength = pathLength;
             bestSideAlignment = sideAlignment;
             best = GridPoint{neighborCol, neighborRow};
+        }
+    }
+
+    return best;
+}
+
+std::optional<GridPoint> FindBestAdjacentApproachTileForEnemy(
+    const GridMap& map, int startCol, int startRow, const EnemyState& target,
+    const std::vector<PlayerState>* players, const std::vector<EnemyState>* enemies,
+    int ignorePlayerId, int ignoreEnemyId) {
+    static constexpr int kDirections[4][2] = {
+        {1, 0},
+        {-1, 0},
+        {0, 1},
+        {0, -1},
+    };
+
+    std::optional<GridPoint> best;
+    int bestPathLength = std::numeric_limits<int>::max();
+    int bestSideAlignment = std::numeric_limits<int>::min();
+    const int targetCol = WorldToCellCol(target.x);
+    const int targetRow = WorldToCellRow(target.y);
+    const int towardStartCol = startCol - targetCol;
+    const int towardStartRow = startRow - targetRow;
+    std::unordered_set<int> seen;
+
+    for (const std::pair<int, int>& occupied : EnemyOccupiedCells(target)) {
+        for (const auto& direction : kDirections) {
+            const int neighborCol = occupied.first + direction[0];
+            const int neighborRow = occupied.second + direction[1];
+            if (!IsValidCell(neighborCol, neighborRow) ||
+                !map.IsWalkable(neighborCol, neighborRow)) {
+                continue;
+            }
+            if (EnemyOccupiesCell(target, neighborCol, neighborRow)) {
+                continue;
+            }
+            const int key = neighborCol * kGridRows + neighborRow;
+            if (!seen.insert(key).second) {
+                continue;
+            }
+            if (players != nullptr && enemies != nullptr &&
+                IsCellOccupied(neighborCol, neighborRow, *players, *enemies, ignorePlayerId,
+                               ignoreEnemyId)) {
+                continue;
+            }
+
+            const std::vector<GridPoint> path =
+                FindPath(map, startCol, startRow, neighborCol, neighborRow);
+            if (path.empty()) {
+                continue;
+            }
+
+            const int pathLength = static_cast<int>(path.size());
+            const int sideAlignment =
+                direction[0] * towardStartCol + direction[1] * towardStartRow;
+            if (pathLength < bestPathLength ||
+                (pathLength == bestPathLength && sideAlignment > bestSideAlignment)) {
+                bestPathLength = pathLength;
+                bestSideAlignment = sideAlignment;
+                best = GridPoint{neighborCol, neighborRow};
+            }
         }
     }
 

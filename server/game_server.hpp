@@ -29,6 +29,15 @@ enum class PlayerComboPhase : uint8_t {
     Attack3,
 };
 
+enum class BossComboPhase : uint8_t {
+    None,
+    Swing1,
+    PauseAfter1,
+    Swing2,
+    PauseAfter2,
+    Swing3,
+};
+
 struct EnemyMovementState {
     bool hasMoveTarget = false;
     std::vector<std::pair<int, int>> movePath;
@@ -38,6 +47,10 @@ struct EnemyMovementState {
     bool chasingPlayer = false;
     int chaseTargetId = -1;
     uint32_t patrolIdleUntilTick = 0;
+    BossComboPhase bossComboPhase = BossComboPhase::None;
+    uint32_t bossComboPhaseStartTick = 0;
+    bool bossComboSwingDamageDealt = false;
+    int bossComboPattern[3] = {1, 1, 1};
 };
 
 struct ConnectedClient {

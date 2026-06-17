@@ -14,6 +14,9 @@ namespace net {
 
 int ManhattanCellDistance(int colA, int rowA, int colB, int rowB);
 bool IsInMeleeRange(float ax, float ay, float bx, float by);
+bool IsInMeleeRangeWithEnemy(float ax, float ay, const EnemyState& enemy);
+bool EnemyOccupiesCell(const EnemyState& enemy, int col, int row);
+std::vector<std::pair<int, int>> CollectAdjacentCellsAroundEnemy(const EnemyState& enemy);
 
 void SnapEntityToCellCenter(float& x, float& y);
 
@@ -33,6 +36,12 @@ std::optional<GridPoint> FindBestAdjacentApproachTile(const GridMap& map, int st
                                                           nullptr,
                                                       int ignorePlayerId = -1,
                                                       int ignoreEnemyId = -1);
+
+std::optional<GridPoint> FindBestAdjacentApproachTileForEnemy(
+    const GridMap& map, int startCol, int startRow, const EnemyState& target,
+    const std::vector<PlayerState>* players = nullptr,
+    const std::vector<EnemyState>* enemies = nullptr, int ignorePlayerId = -1,
+    int ignoreEnemyId = -1);
 
 void TransitionEntity(EntityState& state, uint32_t& stateStartTick, PlayerAnim& anim,
                       uint32_t& animStartTick, EntityState newState, uint32_t tick);
