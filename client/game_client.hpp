@@ -34,6 +34,7 @@ public:
     void SendDisengage();
     void SendRespawnEnemy(int enemyId = net::kRespawnAllDeadEnemiesId);
     void SendSetReady(bool ready);
+    void SendSetArenaReset(bool selected);
     void SendReturnToHub();
     void SendRejoinArena();
     void SendChat(const std::string& text);

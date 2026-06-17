@@ -209,6 +209,19 @@ void GameClient::SendSetReady(bool ready) {
     }
 }
 
+void GameClient::SendSetArenaReset(bool selected) {
+    if (state_ != ClientConnectionState::Joined) {
+        return;
+    }
+
+    const Message message = MakeSetArenaResetRequest(selected);
+    if (useWebSocket_) {
+        wsClient_.Send(message);
+    } else {
+        tcpClient_.Send(message);
+    }
+}
+
 void GameClient::SendReturnToHub() {
     if (state_ != ClientConnectionState::Joined) {
         return;

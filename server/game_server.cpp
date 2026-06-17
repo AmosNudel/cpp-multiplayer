@@ -1546,6 +1546,16 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             HandleSetReady(incoming.clientId, incoming.message.setReadyRequest.ready);
             break;
         }
+        case MessageType::SetArenaResetRequest: {
+            auto it = clients_.find(incoming.clientId);
+            if (it == clients_.end() || !it->second.hasJoined) {
+                return;
+            }
+
+            HandleSetArenaReset(incoming.clientId,
+                                incoming.message.setArenaResetRequest.selected);
+            break;
+        }
         case MessageType::ReturnToHubRequest: {
             auto it = clients_.find(incoming.clientId);
             if (it == clients_.end() || !it->second.hasJoined) {
@@ -1787,6 +1797,9 @@ SessionSnapshot GameServer::BuildSessionSnapshot() const {
         if (player.sceneId == SceneId::Hub && player.isReady) {
             session.readyPlayerIds.push_back(player.id);
         }
+        if (player.sceneId == SceneId::Hub && player.wantsArenaReset) {
+            session.arenaResetPlayerIds.push_back(player.id);
+        }
     }
     return session;
 }
@@ -1832,10 +1845,30 @@ int GameServer::CountReadyHubPlayers() const {
     return count;
 }
 
+int GameServer::CountArenaResetHubPlayers() const {
+    int count = 0;
+    for (const PlayerState& player : players_) {
+        if (player.sceneId == SceneId::Hub && player.wantsArenaReset) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 void GameServer::ClearAllReady() {
     for (PlayerState& player : players_) {
         player.isReady = false;
     }
+}
+
+void GameServer::ClearAllArenaReset() {
+    for (PlayerState& player : players_) {
+        player.wantsArenaReset = false;
+    }
+}
+
+bool GameServer::HasActiveArenaSession() const {
+    return arenaSessionEndsAtTick_ > 0 || !enemies_.empty();
 }
 
 void GameServer::ResetPlayerForScene(PlayerState& player, ConnectedClient* client, SceneId scene,
@@ -1852,6 +1885,7 @@ void GameServer::ResetPlayerForScene(PlayerState& player, ConnectedClient* clien
     const CombatStats& stats = DefaultEntityRegistry().StatsFor(kPlayerEntityId);
     player.sceneId = scene;
     player.isReady = false;
+    player.wantsArenaReset = false;
     player.x = CellCenterX(spawnCol);
     player.y = CellCenterY(spawnRow);
     player.hp = stats.maxHp;
@@ -1976,8 +2010,42 @@ void GameServer::StartArena() {
     sessionPhaseEndsAtTick_ = arenaSessionEndsAtTick_;
     arenaJoinOpensAtTick_ = tick_ + kArenaRejoinDelayTicks;
     allDeadReturnAtTick_ = 0;
+    ClearAllArenaReset();
     std::cout << "[game] arena " << (resumeExistingArena ? "resumed" : "started")
               << " with " << readyPlayerIds.size() << " players\n";
+}
+
+void GameServer::ResetArena() {
+    const GridMap& hubMap = HubGridMap();
+    const int returningCount = CountPlayersInScene(SceneId::Arena);
+    if (returningCount > 0) {
+        const std::vector<std::pair<int, int>> spawnCells =
+            AllocateSpawnCells(hubMap, returningCount);
+        int spawnIndex = 0;
+        for (PlayerState& player : players_) {
+            if (player.sceneId != SceneId::Arena) {
+                continue;
+            }
+
+            ConnectedClient* client = FindClient(clients_, player.id);
+            const auto [spawnCol, spawnRow] = spawnCells[static_cast<size_t>(spawnIndex++)];
+            ResetPlayerForScene(player, client, SceneId::Hub, spawnCol, spawnRow);
+        }
+    }
+
+    enemies_.clear();
+    enemyMovement_.clear();
+    sessionPhase_ = SessionPhase::HubIdle;
+    sessionPhaseEndsAtTick_ = 0;
+    allDeadReturnAtTick_ = 0;
+    arenaJoinOpensAtTick_ = 0;
+    arenaSessionEndsAtTick_ = 0;
+    ClearAllReady();
+    ClearAllArenaReset();
+    for (PlayerState& player : players_) {
+        player.arenaRejoinAtTick = 0;
+    }
+    std::cout << "[game] arena reset by unanimous vote\n";
 }
 
 void GameServer::EndArena() {
@@ -2008,6 +2076,7 @@ void GameServer::EndArena() {
         player.arenaRejoinAtTick = 0;
     }
     ClearAllReady();
+    ClearAllArenaReset();
     std::cout << "[game] arena ended, players returned to hub\n";
 }
 
@@ -2060,6 +2129,28 @@ void GameServer::HandleSetReady(int clientId, bool ready) {
 
     if (readyCount >= hubCount) {
         StartArena();
+    }
+}
+
+void GameServer::HandleSetArenaReset(int clientId, bool selected) {
+    if (!HasActiveArenaSession()) {
+        return;
+    }
+
+    PlayerState* player = FindPlayer(players_, clientId);
+    if (player == nullptr || player->sceneId != SceneId::Hub) {
+        return;
+    }
+
+    player->wantsArenaReset = selected;
+    if (!selected) {
+        return;
+    }
+
+    const int hubCount = CountPlayersInScene(SceneId::Hub);
+    const int resetCount = CountArenaResetHubPlayers();
+    if (hubCount > 0 && resetCount >= hubCount) {
+        ResetArena();
     }
 }
 

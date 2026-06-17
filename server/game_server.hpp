@@ -91,12 +91,14 @@ private:
     void SimulateTick();
     void UpdateSession();
     void HandleSetReady(int clientId, bool ready);
+    void HandleSetArenaReset(int clientId, bool selected);
     void HandleReturnToHub(int clientId);
     void HandleRejoinArena(int clientId);
     void ReturnAllArenaPlayersToHub();
     bool CanPlayerRejoinArena(const PlayerState& player) const;
     void StartArena();
     void EndArena();
+    void ResetArena();
     void BroadcastWorldState();
     void BroadcastToAll(const Message& message);
     void RecordAndBroadcastChat(const ChatMessage& entry);
@@ -106,7 +108,10 @@ private:
     WorldState BuildWorldStateForClient(int clientId) const;
     int CountPlayersInScene(SceneId scene) const;
     int CountReadyHubPlayers() const;
+    int CountArenaResetHubPlayers() const;
     void ClearAllReady();
+    void ClearAllArenaReset();
+    bool HasActiveArenaSession() const;
     void ResetPlayerForScene(PlayerState& player, ConnectedClient* client, SceneId scene,
                              int spawnCol, int spawnRow);
     uint32_t NowMs() const;

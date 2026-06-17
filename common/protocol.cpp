@@ -21,9 +21,13 @@ nlohmann::json SessionSnapshotToJson(const SessionSnapshot& session) {
         {"hub_player_count", session.hubPlayerCount},
         {"arena_player_count", session.arenaPlayerCount},
         {"ready_player_ids", nlohmann::json::array()},
+        {"arena_reset_player_ids", nlohmann::json::array()},
     };
     for (int playerId : session.readyPlayerIds) {
         json["ready_player_ids"].push_back(playerId);
+    }
+    for (int playerId : session.arenaResetPlayerIds) {
+        json["arena_reset_player_ids"].push_back(playerId);
     }
     return json;
 }
@@ -40,6 +44,11 @@ SessionSnapshot SessionSnapshotFromJson(const nlohmann::json& json) {
     if (json.contains("ready_player_ids")) {
         for (const auto& playerIdJson : json.at("ready_player_ids")) {
             session.readyPlayerIds.push_back(playerIdJson.get<int>());
+        }
+    }
+    if (json.contains("arena_reset_player_ids")) {
+        for (const auto& playerIdJson : json.at("arena_reset_player_ids")) {
+            session.arenaResetPlayerIds.push_back(playerIdJson.get<int>());
         }
     }
     return session;
@@ -60,6 +69,7 @@ nlohmann::json PlayerStateToJson(const PlayerState& player) {
         {"shield", player.shield},
         {"scene_id", SceneIdName(player.sceneId)},
         {"is_ready", player.isReady},
+        {"wants_arena_reset", player.wantsArenaReset},
     };
     if (player.targetId >= 0) {
         json["target_id"] = player.targetId;
@@ -92,6 +102,7 @@ PlayerState PlayerStateFromJson(const nlohmann::json& json) {
     player.moveTargetRow = json.value("move_target_row", -1);
     player.sceneId = ParseSceneId(json.value("scene_id", "hub"));
     player.isReady = json.value("is_ready", false);
+    player.wantsArenaReset = json.value("wants_arena_reset", false);
     player.arenaRejoinAtTick = json.value("arena_rejoin_at_tick", 0u);
     return player;
 }
@@ -164,6 +175,7 @@ const char* MessageTypeName(MessageType type) {
         case MessageType::DisengageRequest: return "disengage_request";
         case MessageType::RespawnEnemyRequest: return "respawn_enemy_request";
         case MessageType::SetReadyRequest: return "set_ready_request";
+        case MessageType::SetArenaResetRequest: return "set_arena_reset_request";
         case MessageType::ReturnToHubRequest: return "return_to_hub_request";
         case MessageType::RejoinArenaRequest: return "rejoin_arena_request";
         case MessageType::WorldState: return "world_state";
@@ -186,6 +198,7 @@ MessageType ParseMessageType(const std::string& value) {
     if (value == "disengage_request") return MessageType::DisengageRequest;
     if (value == "respawn_enemy_request") return MessageType::RespawnEnemyRequest;
     if (value == "set_ready_request") return MessageType::SetReadyRequest;
+    if (value == "set_arena_reset_request") return MessageType::SetArenaResetRequest;
     if (value == "return_to_hub_request") return MessageType::ReturnToHubRequest;
     if (value == "rejoin_arena_request") return MessageType::RejoinArenaRequest;
     if (value == "world_state") return MessageType::WorldState;
@@ -261,6 +274,13 @@ Message MakeSetReadyRequest(bool ready) {
     Message message;
     message.type = MessageType::SetReadyRequest;
     message.setReadyRequest.ready = ready;
+    return message;
+}
+
+Message MakeSetArenaResetRequest(bool selected) {
+    Message message;
+    message.type = MessageType::SetArenaResetRequest;
+    message.setArenaResetRequest.selected = selected;
     return message;
 }
 
@@ -373,6 +393,9 @@ std::string SerializeMessage(const Message& message) {
         case MessageType::SetReadyRequest:
             json["ready"] = message.setReadyRequest.ready;
             break;
+        case MessageType::SetArenaResetRequest:
+            json["selected"] = message.setArenaResetRequest.selected;
+            break;
         case MessageType::ReturnToHubRequest:
             break;
         case MessageType::RejoinArenaRequest:
@@ -458,6 +481,9 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
                 break;
             case MessageType::SetReadyRequest:
                 message.setReadyRequest.ready = json.value("ready", true);
+                break;
+            case MessageType::SetArenaResetRequest:
+                message.setArenaResetRequest.selected = json.value("selected", true);
                 break;
             case MessageType::ReturnToHubRequest:
                 break;

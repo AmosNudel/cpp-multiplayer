@@ -445,6 +445,17 @@ static bool IsArenaSessionRunning() {
     return session.arenaSessionEndsAtTick > gClient.GetServerTick();
 }
 
+static void AppendArenaResetHint(std::string& text) {
+    if (!IsArenaSessionRunning() || GetLocalScene() != net::SceneId::Hub) {
+        return;
+    }
+
+    const net::SessionSnapshot& session = gClient.GetSession();
+    const int resetCount = static_cast<int>(session.arenaResetPlayerIds.size());
+    text += TextFormat(", %d/%d voted reset (orange tile)",
+                       resetCount, session.hubPlayerCount);
+}
+
 static int ArenaRejoinSecondsLeft() {
     const net::SessionSnapshot& session = gClient.GetSession();
     if (session.phase != net::SessionPhase::ArenaActive || session.arenaPlayerCount == 0) {
@@ -862,6 +873,7 @@ static void UpdateStatusText() {
                 "Hub - arena active (%d:%02d left), click portal to rejoin",
                 secondsLeft / 60, secondsLeft % 60);
         }
+        AppendArenaResetHint(gStatusText);
         return;
     }
 
@@ -878,6 +890,7 @@ static void UpdateStatusText() {
                 "Hub - arena paused (%d:%02d left), %d/%d ready, starting in %ds (click portal)",
                 secondsLeft / 60, secondsLeft % 60, readyCount, session.hubPlayerCount,
                 lobbySecondsLeft);
+            AppendArenaResetHint(gStatusText);
             return;
         }
 
@@ -888,6 +901,7 @@ static void UpdateStatusText() {
             gStatusText = TextFormat("Hub - arena paused (%d:%02d left), click portal to ready up",
                                      secondsLeft / 60, secondsLeft % 60);
         }
+        AppendArenaResetHint(gStatusText);
         return;
     }
 
@@ -1208,6 +1222,16 @@ static void HandleMapClick() {
         return;
     }
 
+    if (GetLocalScene() == net::SceneId::Hub && net::IsResetArenaCell(col, row)) {
+        if (!IsArenaSessionRunning()) {
+            return;
+        }
+        const net::PlayerState* local = FindLocalPlayer();
+        const bool newSelected = local == nullptr || !local->wantsArenaReset;
+        gClient.SendSetArenaReset(newSelected);
+        return;
+    }
+
     if (IsLocalPlayerDead()) {
         return;
     }
@@ -1367,6 +1391,11 @@ static void DrawGridTiles() {
             if (tile == net::TileType::Empty || tile == net::TileType::Enemy) {
                 if (inHub && net::IsPortalCell(col, row)) {
                     DrawRectangleRec(CellWorldRect(col, row), Color{70, 120, 255, 220});
+                } else if (inHub && net::IsResetArenaCell(col, row)) {
+                    const Color resetColor = IsArenaSessionRunning()
+                                                 ? Color{235, 90, 60, 220}
+                                                 : Color{120, 70, 55, 120};
+                    DrawRectangleRec(CellWorldRect(col, row), resetColor);
                 }
                 continue;
             }
@@ -1419,6 +1448,10 @@ static void DrawGridHighlights() {
                                : Color{180, 80, 80, 50};
         if (GetLocalScene() == net::SceneId::Hub && net::IsPortalCell(hoverCol, hoverRow)) {
             hoverColor = Color{100, 160, 255, 90};
+        } else if (GetLocalScene() == net::SceneId::Hub &&
+                   net::IsResetArenaCell(hoverCol, hoverRow)) {
+            hoverColor = IsArenaSessionRunning() ? Color{255, 120, 80, 90}
+                                                 : Color{160, 90, 70, 50};
         }
         DrawRectangleRec(CellWorldRect(hoverCol, hoverRow), hoverColor);
     }
@@ -1667,6 +1700,9 @@ static void DrawPlayerName(const net::PlayerState& player, float nameOffsetY) {
     std::string label = player.name;
     if (player.sceneId == net::SceneId::Hub && player.isReady) {
         label += " [ready]";
+    }
+    if (player.sceneId == net::SceneId::Hub && player.wantsArenaReset) {
+        label += " [reset]";
     }
     DrawText(label.c_str(),
              static_cast<int>(virtualCenter.x - 24.0f),

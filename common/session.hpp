@@ -20,6 +20,8 @@ enum class SessionPhase : uint8_t {
 
 inline constexpr int kHubPortalCol = 10;
 inline constexpr int kHubPortalRow = 13;
+inline constexpr int kHubResetCol = 8;
+inline constexpr int kHubResetRow = 13;
 inline constexpr int kLobbyDurationSeconds = 30;
 inline constexpr int kArenaDurationSeconds = 180;
 inline constexpr int kAllDeadReturnSeconds = 5;
@@ -69,6 +71,10 @@ inline SessionPhase ParseSessionPhase(const std::string& value) {
 
 inline bool IsPortalCell(int col, int row) {
     return col == kHubPortalCol && row == kHubPortalRow;
+}
+
+inline bool IsResetArenaCell(int col, int row) {
+    return col == kHubResetCol && row == kHubResetRow;
 }
 
 }  // namespace net

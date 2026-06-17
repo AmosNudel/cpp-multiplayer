@@ -24,6 +24,7 @@ enum class MessageType {
     DisengageRequest,
     RespawnEnemyRequest,
     SetReadyRequest,
+    SetArenaResetRequest,
     ReturnToHubRequest,
     RejoinArenaRequest,
     WorldState,
@@ -55,6 +56,10 @@ struct SetReadyRequest {
     bool ready = true;
 };
 
+struct SetArenaResetRequest {
+    bool selected = true;
+};
+
 struct ReturnToHubRequest {};
 
 struct RejoinArenaRequest {};
@@ -66,6 +71,7 @@ struct SessionSnapshot {
     uint32_t arenaJoinOpensAtTick = 0;
     uint32_t arenaSessionEndsAtTick = 0;
     std::vector<int> readyPlayerIds;
+    std::vector<int> arenaResetPlayerIds;
     int hubPlayerCount = 0;
     int arenaPlayerCount = 0;
 };
@@ -87,6 +93,7 @@ struct PlayerState {
     int moveTargetRow = -1;
     SceneId sceneId = SceneId::Hub;
     bool isReady = false;
+    bool wantsArenaReset = false;
     uint32_t arenaRejoinAtTick = 0;
 };
 
@@ -146,6 +153,7 @@ struct Message {
     DisengageRequest disengageRequest;
     RespawnEnemyRequest respawnEnemyRequest;
     SetReadyRequest setReadyRequest;
+    SetArenaResetRequest setArenaResetRequest;
     ReturnToHubRequest returnToHubRequest;
     RejoinArenaRequest rejoinArenaRequest;
     WorldState worldState;
@@ -170,6 +178,7 @@ Message MakeCancelCombatRequest();
 Message MakeDisengageRequest();
 Message MakeRespawnEnemyRequest(int enemyId = kRespawnAllDeadEnemiesId);
 Message MakeSetReadyRequest(bool ready);
+Message MakeSetArenaResetRequest(bool selected);
 Message MakeReturnToHubRequest();
 Message MakeRejoinArenaRequest();
 Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players,
