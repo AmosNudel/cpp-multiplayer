@@ -247,6 +247,8 @@ static int gSpectateTargetId = -1;
 
 static void DrawUiButton(const char* label, Rectangle bounds, bool enabled = true);
 static bool WasUiButtonPressed(Rectangle bounds, bool enabled = true);
+static const net::PlayerState* FindLocalPlayer();
+static net::SceneId GetLocalScene();
 
 static constexpr int kChatPanelX = 20;
 static constexpr int kChatPanelW = 420;
@@ -662,7 +664,7 @@ static bool IsMouseOverActionsPanel(Vector2 virtualPos) {
     return CheckCollisionPointRec(virtualPos, ActionsPanelRect());
 }
 
-static void DrawUiButton(const char* label, Rectangle bounds, bool enabled = true) {
+static void DrawUiButton(const char* label, Rectangle bounds, bool enabled) {
     const Vector2 mouse = GetVirtualMousePosition();
     const bool hover = enabled && CheckCollisionPointRec(mouse, bounds);
     DrawRectangleRec(bounds,
@@ -678,7 +680,7 @@ static void DrawUiButton(const char* label, Rectangle bounds, bool enabled = tru
              fontSize, enabled ? RAYWHITE : Color{120, 124, 132, 255});
 }
 
-static bool WasUiButtonPressed(Rectangle bounds, bool enabled = true) {
+static bool WasUiButtonPressed(Rectangle bounds, bool enabled) {
     return enabled && CheckCollisionPointRec(GetVirtualMousePosition(), bounds) &&
            IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
@@ -1018,25 +1020,56 @@ static void HandleUiClicks() {
 }
 
 #if !defined(PLATFORM_WEB)
+struct OptionsPanelLayout {
+    int panelX = 0;
+    int panelY = 0;
+    int panelW = 260;
+    int panelH = 180;
+    Rectangle resumeBtn{};
+    Rectangle returnToHubBtn{};
+    Rectangle exitBtn{};
+    bool showReturnToHub = false;
+};
+
+static OptionsPanelLayout BuildOptionsPanelLayout() {
+    OptionsPanelLayout layout;
+    layout.showReturnToHub = gClient.GetState() == net::ClientConnectionState::Joined &&
+                             GetLocalScene() == net::SceneId::Arena;
+    layout.panelH = layout.showReturnToHub ? 232 : 180;
+    layout.panelX = (GameViewport::kVirtualWidth - layout.panelW) / 2;
+    layout.panelY = (GameViewport::kVirtualHeight - layout.panelH) / 2;
+    layout.resumeBtn = {static_cast<float>(layout.panelX + 30),
+                        static_cast<float>(layout.panelY + 52), 200.0f, 32.0f};
+    if (layout.showReturnToHub) {
+        layout.returnToHubBtn = {static_cast<float>(layout.panelX + 30),
+                                 static_cast<float>(layout.panelY + 102), 200.0f, 32.0f};
+        layout.exitBtn = {static_cast<float>(layout.panelX + 30),
+                          static_cast<float>(layout.panelY + 152), 200.0f, 32.0f};
+    } else {
+        layout.exitBtn = {static_cast<float>(layout.panelX + 30),
+                          static_cast<float>(layout.panelY + 102), 200.0f, 32.0f};
+    }
+    return layout;
+}
+
 static void HandleOptionsInput() {
     if (!gOptionsOpen) {
         return;
     }
 
-    const int panelW = 260;
-    const int panelH = 180;
-    const int panelX = (GameViewport::kVirtualWidth - panelW) / 2;
-    const int panelY = (GameViewport::kVirtualHeight - panelH) / 2;
-    const Rectangle resumeBtn = {static_cast<float>(panelX + 30), static_cast<float>(panelY + 52),
-                                 200.0f, 32.0f};
-    const Rectangle exitBtn = {static_cast<float>(panelX + 30), static_cast<float>(panelY + 102),
-                               200.0f, 32.0f};
+    const OptionsPanelLayout layout = BuildOptionsPanelLayout();
 
-    if (WasUiButtonPressed(resumeBtn)) {
+    if (WasUiButtonPressed(layout.resumeBtn)) {
         gOptionsOpen = false;
     }
 
-    if (WasUiButtonPressed(exitBtn)) {
+    if (layout.showReturnToHub && WasUiButtonPressed(layout.returnToHubBtn)) {
+        StopSpectating();
+        gClient.SendReturnToHub();
+        gOptionsOpen = false;
+    }
+
+    if (WasUiButtonPressed(layout.exitBtn)) {
         if (gClient.GetState() == net::ClientConnectionState::Joined) {
             gClient.Disconnect();
         }
@@ -1280,22 +1313,22 @@ static void DrawOptionsPanel() {
         return;
     }
 
+    const OptionsPanelLayout layout = BuildOptionsPanelLayout();
+
     DrawRectangle(0, 0, GameViewport::kVirtualWidth, GameViewport::kVirtualHeight,
                   Color{0, 0, 0, 120});
 
-    const int panelW = 260;
-    const int panelH = 180;
-    const int panelX = (GameViewport::kVirtualWidth - panelW) / 2;
-    const int panelY = (GameViewport::kVirtualHeight - panelH) / 2;
+    DrawRectangle(layout.panelX, layout.panelY, layout.panelW, layout.panelH,
+                  Color{28, 30, 38, 255});
+    DrawRectangleLines(layout.panelX, layout.panelY, layout.panelW, layout.panelH,
+                       Color{82, 88, 104, 255});
+    DrawText("Options", layout.panelX + 16, layout.panelY + 12, 22, RAYWHITE);
 
-    DrawRectangle(panelX, panelY, panelW, panelH, Color{28, 30, 38, 255});
-    DrawRectangleLines(panelX, panelY, panelW, panelH, Color{82, 88, 104, 255});
-    DrawText("Options", panelX + 16, panelY + 12, 22, RAYWHITE);
-
-    DrawUiButton("Resume", {static_cast<float>(panelX + 30), static_cast<float>(panelY + 52),
-                            200.0f, 32.0f});
-    DrawUiButton("Exit Game", {static_cast<float>(panelX + 30), static_cast<float>(panelY + 102),
-                               200.0f, 32.0f});
+    DrawUiButton("Resume", layout.resumeBtn);
+    if (layout.showReturnToHub) {
+        DrawUiButton("Return to Hub", layout.returnToHubBtn);
+    }
+    DrawUiButton("Exit Game", layout.exitBtn);
 }
 #endif
 

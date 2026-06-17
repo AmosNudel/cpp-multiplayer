@@ -1799,8 +1799,7 @@ void GameServer::HandleReturnToHub(int clientId) {
     }
 
     PlayerState* player = FindPlayer(players_, clientId);
-    if (player == nullptr || player->sceneId != SceneId::Arena ||
-        player->state != EntityState::Dead) {
+    if (player == nullptr || player->sceneId != SceneId::Arena) {
         return;
     }
 
