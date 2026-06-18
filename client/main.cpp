@@ -404,15 +404,6 @@ static Rectangle ChatToggleButtonRect() {
     };
 }
 
-static Rectangle RespawnGoblinButtonRect() {
-    return {
-        static_cast<float>(GameViewport::kVirtualWidth - 148),
-        20.0f,
-        88.0f,
-        32.0f,
-    };
-}
-
 static Rectangle ActionsPanelRect() {
     return {
         20.0f,
@@ -1107,7 +1098,6 @@ static void UpdateStatusText() {
         }
 
         const int secondsLeft = ArenaSecondsLeft();
-        const net::SessionSnapshot& session = gClient.GetSession();
         const int nextThreshold = session.teamLevel >= net::kMaxTeamLevel
                                       ? session.teamXp
                                       : net::TeamXpThresholdForLevel(session.teamLevel + 1);
@@ -1193,8 +1183,6 @@ static void DrawSpectateHud() {
         DrawText("Spectating", 20, GameViewport::kHudHeight + 12, 16, LIGHTGRAY);
     }
 
-    DrawText("Tab = next   Shift+Tab = prev   click player = target", 20,
-             GameViewport::kHudHeight + 32, 14, GRAY);
     DrawUiButton("<", SpectatePrevButtonRect(), canCycle);
     DrawUiButton(">", SpectateNextButtonRect(), canCycle);
     DrawUiButton("Return to Hub", SpectateReturnButtonRect());
@@ -1261,15 +1249,6 @@ static void HandleSpectateInput() {
         SetSpectateTarget(bestTarget->id);
         UpdateSpectateCamera();
     }
-}
-
-static void DrawRespawnGoblinButton() {
-    if (gEditingName || gClient.GetState() != net::ClientConnectionState::Joined ||
-        GetLocalScene() != net::SceneId::Arena || IsLocalPlayerDead()) {
-        return;
-    }
-
-    DrawUiButton("Respawn All", RespawnGoblinButtonRect());
 }
 
 static void DrawActionsPanel() {
@@ -1568,13 +1547,6 @@ static void HandleUiClicks() {
         } else {
             gChatExpanded = true;
         }
-        return;
-    }
-
-    if (gClient.GetState() == net::ClientConnectionState::Joined &&
-        GetLocalScene() == net::SceneId::Arena &&
-        WasUiButtonPressed(RespawnGoblinButtonRect())) {
-        gClient.SendRespawnEnemy(net::kRespawnAllDeadEnemiesId);
         return;
     }
 
@@ -2145,12 +2117,7 @@ static void DrawGame() {
         DrawPlayerName(player, nameOffsetY);
     }
 
-    DrawText("Multiplayer Template", 20, 20, 24, RAYWHITE);
     DrawText(gStatusText.c_str(), 20, 52, 18, LIGHTGRAY);
-    if (GetLocalScene() == net::SceneId::Hub) {
-        DrawText("Portal: blue tile near bottom center", 20, 76, 16, GRAY);
-    }
-    DrawRespawnGoblinButton();
     DrawActionsPanel();
 
     if (gEditingName) {
@@ -2162,16 +2129,6 @@ static void DrawGame() {
         DrawText("ESC = options", 20, 152, 16, GRAY);
 #endif
     } else {
-        DrawText(TextFormat("Tick: %u", gClient.GetServerTick()), 20, 100, 18, GRAY);
-        DrawText(TextFormat("Ping: %d ms", gClient.GetPingMs()), 20, 124, 18, GRAY);
-        DrawText(TextFormat("Zoom: %.0f%%   Scroll = zoom   MMB = pan   R = reset",
-                            gWorldView.Zoom() * 100.0f),
-                 20, 148, 16, GRAY);
-#if !defined(PLATFORM_WEB)
-        DrawText("F11 = fullscreen   ESC = options", 20, 172, 16, GRAY);
-#else
-        DrawText("F11 = fullscreen", 20, 172, 16, GRAY);
-#endif
         DrawChatPanel();
     }
 
