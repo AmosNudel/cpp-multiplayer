@@ -324,6 +324,7 @@ static std::unordered_map<int, EntityVisualState> gEnemyVisuals;
 static std::vector<FloatingDamage> gFloatingDamage;
 static uint32_t gLastSyncedTick = 0;
 static int gPendingSkillId = -1;
+static int gLastUnlockedSkillCount = 0;
 
 static constexpr double kCombatHitFlashDuration = 0.12;
 static constexpr double kFloatingDamageDuration = 0.9;
@@ -496,12 +497,72 @@ static int SkillCooldownSecondsLeft(int skillId) {
     return 0;
 }
 
+static std::optional<int> FindEnemyAtCell(int col, int row);
+
 static bool LocalPlayerNeedsSkillPick() {
     const net::PlayerState* local = FindLocalPlayer();
     if (local == nullptr || GetLocalScene() != net::SceneId::Arena) {
         return false;
     }
     return local->skillTier < gClient.GetSession().teamLevel;
+}
+
+static void BeginSkillTargeting(net::SkillId skillId) {
+    if (skillId == net::SkillId::None || !net::SkillRequiresGridTarget(skillId)) {
+        return;
+    }
+    gPendingSkillId = net::SkillIdToInt(skillId);
+}
+
+static void BeginSkillTargetingForBranch(net::SkillBranch branch) {
+    const net::PlayerState* local = FindLocalPlayer();
+    if (local == nullptr) {
+        return;
+    }
+    const net::SkillId skill =
+        net::SkillForBranchTier(branch, local->skillTier + 1);
+    BeginSkillTargeting(skill);
+}
+
+static std::pair<int, int> ResolveDamageSkillTarget(int col, int row) {
+    if (FindEnemyAtCell(col, row).has_value()) {
+        return {col, row};
+    }
+
+    static constexpr int kDirections[4][2] = {
+        {1, 0},
+        {-1, 0},
+        {0, 1},
+        {0, -1},
+    };
+
+    for (const auto& direction : kDirections) {
+        const int candidateCol = col + direction[0];
+        const int candidateRow = row + direction[1];
+        if (!net::IsValidCell(candidateCol, candidateRow)) {
+            continue;
+        }
+        if (!FindEnemyAtCell(candidateCol, candidateRow).has_value()) {
+            continue;
+        }
+        return {candidateCol, candidateRow};
+    }
+
+    return {col, row};
+}
+
+static void SyncPendingSkillAfterUnlock() {
+    const net::PlayerState* local = FindLocalPlayer();
+    if (local == nullptr || GetLocalScene() != net::SceneId::Arena) {
+        gLastUnlockedSkillCount = 0;
+        return;
+    }
+
+    const int unlockedCount = static_cast<int>(local->unlockedSkillIds.size());
+    if (unlockedCount > gLastUnlockedSkillCount && !local->unlockedSkillIds.empty()) {
+        BeginSkillTargeting(net::SkillIdFromInt(local->unlockedSkillIds.back()));
+    }
+    gLastUnlockedSkillCount = unlockedCount;
 }
 
 static Rectangle SkillButtonRect(int index) {
@@ -880,6 +941,7 @@ static void ResetClientVisualState() {
     gFloatingDamage.clear();
     gLastSyncedTick = 0;
     gPendingSkillId = -1;
+    gLastUnlockedSkillCount = 0;
 }
 
 static Vector2 InterpolatedPosition(const EntityVisualState& visual) {
@@ -963,6 +1025,8 @@ static void SyncEntityVisuals() {
         nextEnemies[enemy.id] = visual;
     }
     gEnemyVisuals = std::move(nextEnemies);
+
+    SyncPendingSkillAfterUnlock();
 
     const double now = GetTime();
     gFloatingDamage.erase(
@@ -1505,7 +1569,15 @@ static void HandleMapClick() {
     }
 
     if (gPendingSkillId >= 0 && GetLocalScene() == net::SceneId::Arena) {
-        gClient.SendUseSkill(gPendingSkillId, col, row);
+        int targetCol = col;
+        int targetRow = row;
+        const net::SkillDef& def = net::SkillDefFor(net::SkillIdFromInt(gPendingSkillId));
+        if (def.damage > 0) {
+            const std::pair<int, int> resolved = ResolveDamageSkillTarget(col, row);
+            targetCol = resolved.first;
+            targetRow = resolved.second;
+        }
+        gClient.SendUseSkill(gPendingSkillId, targetCol, targetRow);
         gPendingSkillId = -1;
         return;
     }
@@ -1560,14 +1632,17 @@ static void HandleUiClicks() {
     if (LocalPlayerNeedsSkillPick()) {
         if (WasUiButtonPressed(BranchVoteButtonRect(0))) {
             gClient.SendVoteSkillBranch(net::SkillBranch::Dps);
+            BeginSkillTargetingForBranch(net::SkillBranch::Dps);
             return;
         }
         if (WasUiButtonPressed(BranchVoteButtonRect(1))) {
             gClient.SendVoteSkillBranch(net::SkillBranch::Shield);
+            BeginSkillTargetingForBranch(net::SkillBranch::Shield);
             return;
         }
         if (WasUiButtonPressed(BranchVoteButtonRect(2))) {
             gClient.SendVoteSkillBranch(net::SkillBranch::Support);
+            BeginSkillTargetingForBranch(net::SkillBranch::Support);
             return;
         }
     }
@@ -1580,7 +1655,11 @@ static void HandleUiClicks() {
             for (int skillId : local->unlockedSkillIds) {
                 if (WasUiButtonPressed(SkillButtonRect(skillButtonIndex),
                                        !IsSkillOnCooldown(skillId))) {
-                    gPendingSkillId = (gPendingSkillId == skillId) ? -1 : skillId;
+                    if (gPendingSkillId == skillId) {
+                        gPendingSkillId = -1;
+                    } else {
+                        BeginSkillTargeting(net::SkillIdFromInt(skillId));
+                    }
                     return;
                 }
                 ++skillButtonIndex;

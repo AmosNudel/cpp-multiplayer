@@ -141,7 +141,7 @@ private:
     void PruneOrphanedEnemyMovement();
     void AwardTeamXp(int amount);
     void OnEnemyKilled(const EnemyState& enemy);
-    void ApplySkillEffect(int casterId, SkillId skillId, int col, int row);
+    bool ApplySkillEffect(int casterId, SkillId skillId, int col, int row);
     void UpdateSkillEffects();
     void SyncPlayerSkillCooldowns(PlayerState& player, ConnectedClient& client);
     uint32_t NowMs() const;

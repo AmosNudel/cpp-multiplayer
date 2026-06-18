@@ -8,6 +8,8 @@
 
 namespace net {
 
+struct EnemyState;
+
 enum class SkillBranch : uint8_t {
     Dps,
     Shield,
@@ -125,5 +127,6 @@ void CollectSkillTargetCells(int centerCol, int centerRow, int aoeRadius,
                              std::vector<std::pair<int, int>>& out);
 bool IsCellInSkillRange(int casterCol, int casterRow, int targetCol, int targetRow,
                         int rangeCells);
+bool IsEnemyInSkillArea(const EnemyState& enemy, int centerCol, int centerRow, int aoeRadius);
 
 }  // namespace net

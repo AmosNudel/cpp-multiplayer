@@ -1,10 +1,19 @@
 #include "common/skills.hpp"
 
 #include <algorithm>
+#include <cmath>
+
+#include "common/entity_state.hpp"
+#include "common/grid.hpp"
+#include "common/protocol.hpp"
 
 namespace net {
 
 namespace {
+
+const SkillDef kNoneSkillDef = {
+    SkillId::None, SkillBranch::Dps, 0, "", 0, 0, 0, 0, 0, 0,
+};
 
 const SkillDef kSkillDefs[] = {
     {SkillId::Thunderstrike, SkillBranch::Dps, 1, "Thunderstrike", 15, 6, 0, 30, 0, 0},
@@ -26,7 +35,7 @@ const SkillDef& SkillDefFor(SkillId id) {
             return def;
         }
     }
-    return kSkillDefs[0];
+    return kNoneSkillDef;
 }
 
 SkillId SkillForBranchTier(SkillBranch branch, int tier) {
@@ -39,8 +48,29 @@ SkillId SkillForBranchTier(SkillBranch branch, int tier) {
 }
 
 bool SkillRequiresGridTarget(SkillId id) {
+    if (id == SkillId::None) {
+        return false;
+    }
     const SkillDef& def = SkillDefFor(id);
-    return def.id != SkillId::None && def.rangeCells > 0;
+    return def.id == id && def.rangeCells > 0;
+}
+
+bool IsEnemyInSkillArea(const EnemyState& enemy, int centerCol, int centerRow, int aoeRadius) {
+    if (!IsAlive(enemy.state)) {
+        return false;
+    }
+
+    const int enemyCol = WorldToCellCol(enemy.x);
+    const int enemyRow = WorldToCellRow(enemy.y);
+    if (std::abs(enemyCol - centerCol) <= aoeRadius &&
+        std::abs(enemyRow - centerRow) <= aoeRadius) {
+        return true;
+    }
+
+    const float centerX = CellCenterX(centerCol);
+    const float centerY = CellCenterY(centerRow);
+    const float halfSize = (static_cast<float>(aoeRadius) + 0.5f) * kGridCellSize;
+    return std::abs(enemy.x - centerX) <= halfSize && std::abs(enemy.y - centerY) <= halfSize;
 }
 
 bool SkillIsUnlocked(const std::vector<int>& unlockedSkills, SkillId id) {

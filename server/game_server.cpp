@@ -2524,37 +2524,26 @@ bool CellMatchesEntity(int col, int row, float entityX, float entityY) {
     return WorldToCellCol(entityX) == col && WorldToCellRow(entityY) == row;
 }
 
-bool EnemyOnCell(const EnemyState& enemy, int col, int row) {
-    for (const std::pair<int, int>& cell : EnemyOccupiedCells(enemy)) {
-        if (cell.first == col && cell.second == row) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void GameServer::ApplySkillEffect(int casterId, SkillId skillId, int col, int row) {
+bool GameServer::ApplySkillEffect(int casterId, SkillId skillId, int col, int row) {
     const SkillDef& def = SkillDefFor(skillId);
-    if (def.id == SkillId::None) {
-        return;
+    if (skillId == SkillId::None || def.id != skillId) {
+        return false;
     }
 
     PlayerState* caster = FindPlayer(players_, casterId);
     if (caster == nullptr || caster->sceneId != SceneId::Arena ||
         !IsAlive(caster->state)) {
-        return;
+        return false;
     }
 
-    const GridMap& map = ArenaGridMap();
-    (void)map;
     if (!net::IsValidCell(col, row)) {
-        return;
+        return false;
     }
 
     const int casterCol = WorldToCellCol(caster->x);
     const int casterRow = WorldToCellRow(caster->y);
     if (!IsCellInSkillRange(casterCol, casterRow, col, row, def.rangeCells)) {
-        return;
+        return false;
     }
 
     std::vector<std::pair<int, int>> targetCells;
@@ -2562,14 +2551,13 @@ void GameServer::ApplySkillEffect(int casterId, SkillId skillId, int col, int ro
 
     if (def.damage > 0) {
         for (EnemyState& enemy : enemies_) {
-            if (!IsAlive(enemy.state)) {
+            if (!IsEnemyInSkillArea(enemy, col, row, def.aoeRadius)) {
                 continue;
             }
-            for (const std::pair<int, int>& cell : targetCells) {
-                if (EnemyOnCell(enemy, cell.first, cell.second)) {
-                    ApplyDamageToEnemy(enemy, def.damage, tick_, false);
-                    break;
-                }
+            const int hpBefore = enemy.hp;
+            ApplyDamageToEnemy(enemy, def.damage, tick_, false);
+            if (hpBefore > 0 && enemy.hp <= 0) {
+                OnEnemyKilled(enemy);
             }
         }
     }
@@ -2595,6 +2583,7 @@ void GameServer::ApplySkillEffect(int casterId, SkillId skillId, int col, int ro
 
     skillEffects_.push_back(
         SkillEffectState{SkillIdToInt(skillId), col, row, casterId, tick_});
+    return true;
 }
 
 void GameServer::HandleUseSkill(int clientId, int skillId, int col, int row) {
@@ -2619,7 +2608,9 @@ void GameServer::HandleUseSkill(int clientId, int skillId, int col, int row) {
         return;
     }
 
-    ApplySkillEffect(clientId, skill, col, row);
+    if (!ApplySkillEffect(clientId, skill, col, row)) {
+        return;
+    }
 
     const SkillDef& def = SkillDefFor(skill);
     const uint32_t cooldownTicks =
