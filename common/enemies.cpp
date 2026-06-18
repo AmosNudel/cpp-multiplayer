@@ -338,6 +338,15 @@ bool HasGoblinBoss(const std::vector<EnemyState>& enemies) {
     return false;
 }
 
+bool IsGoblinBossDefeated(const std::vector<EnemyState>& enemies) {
+    for (const EnemyState& enemy : enemies) {
+        if (IsGoblinBoss(enemy)) {
+            return enemy.state == EntityState::Dead;
+        }
+    }
+    return false;
+}
+
 bool IsValidGoblinBossSpawnCell(int col, int row, const GridMap& map,
                                 const std::vector<EnemyState>& enemies) {
     if (!map.IsWalkable(col, row)) {

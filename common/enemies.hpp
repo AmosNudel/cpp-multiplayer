@@ -74,6 +74,7 @@ bool IsRegularGoblin(const EnemyState& enemy);
 std::vector<std::pair<int, int>> EnemyOccupiedCells(const EnemyState& enemy);
 bool AllRegularGoblinsDefeated(const std::vector<EnemyState>& enemies);
 bool HasGoblinBoss(const std::vector<EnemyState>& enemies);
+bool IsGoblinBossDefeated(const std::vector<EnemyState>& enemies);
 std::pair<int, int> PickGoblinBossSpawnCell(const GridMap& map,
                                             const std::vector<EnemyState>& enemies);
 

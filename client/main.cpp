@@ -464,6 +464,24 @@ static bool IsArenaWipePending() {
            session.allDeadReturnAtTick > gClient.GetServerTick();
 }
 
+static bool IsArenaVictoryActive() {
+    const net::SessionSnapshot& session = gClient.GetSession();
+    return gClient.GetState() == net::ClientConnectionState::Joined &&
+           GetLocalScene() == net::SceneId::Arena &&
+           session.phase == net::SessionPhase::ArenaActive &&
+           session.arenaVictoryEndsAtTick > gClient.GetServerTick();
+}
+
+static int ArenaVictorySecondsLeft() {
+    const net::SessionSnapshot& session = gClient.GetSession();
+    if (session.arenaVictoryEndsAtTick <= gClient.GetServerTick()) {
+        return 0;
+    }
+    return static_cast<int>((session.arenaVictoryEndsAtTick - gClient.GetServerTick() +
+                             net::kTickRate - 1) /
+                            net::kTickRate);
+}
+
 static bool IsArenaSessionRunning() {
     const net::SessionSnapshot& session = gClient.GetSession();
     return session.arenaSessionEndsAtTick > gClient.GetServerTick();
@@ -682,7 +700,8 @@ static Rectangle SpectateNextButtonRect() {
 
 static bool ShouldShowDeathPanel() {
     return gClient.GetState() == net::ClientConnectionState::Joined &&
-           GetLocalScene() == net::SceneId::Arena && IsLocalPlayerDead() && !gSpectating;
+           GetLocalScene() == net::SceneId::Arena && IsLocalPlayerDead() && !gSpectating &&
+           !IsArenaVictoryActive();
 }
 
 static int ArenaDeathRespawnSecondsLeft() {
@@ -737,7 +756,8 @@ static void DrawDeathPanel() {
 
 static void DrawArenaWipeOverlay() {
     if (gClient.GetState() != net::ClientConnectionState::Joined ||
-        GetLocalScene() != net::SceneId::Arena || !IsArenaWipePending() || IsLocalPlayerDead()) {
+        GetLocalScene() != net::SceneId::Arena || !IsArenaWipePending() || IsLocalPlayerDead() ||
+        IsArenaVictoryActive()) {
         return;
     }
 
@@ -753,6 +773,26 @@ static void DrawArenaWipeOverlay() {
     DrawText("Everyone is down", panelX + 24, panelY + 16, 22, RAYWHITE);
     DrawText(TextFormat("Returning to hub in %ds...", ArenaWipeSecondsLeft()), panelX + 24,
              panelY + 48, 18, LIGHTGRAY);
+}
+
+static void DrawVictoryOverlay() {
+    if (!IsArenaVictoryActive()) {
+        return;
+    }
+
+    DrawRectangle(0, 0, GameViewport::kVirtualWidth, GameViewport::kVirtualHeight,
+                  Color{0, 0, 0, 140});
+
+    const int panelW = 380;
+    const int panelH = 160;
+    const int panelX = (GameViewport::kVirtualWidth - panelW) / 2;
+    const int panelY = (GameViewport::kVirtualHeight - panelH) / 2;
+    DrawRectangle(panelX, panelY, panelW, panelH, Color{28, 36, 28, 250});
+    DrawRectangleLines(panelX, panelY, panelW, panelH, Color{120, 200, 90, 255});
+    DrawText("Victory!", panelX + 24, panelY + 24, 36, Color{140, 255, 120, 255});
+    DrawText("Goblin Boss defeated", panelX + 24, panelY + 72, 22, RAYWHITE);
+    DrawText(TextFormat("Returning to hub in %ds...", ArenaVictorySecondsLeft()), panelX + 24,
+             panelY + 108, 18, LIGHTGRAY);
 }
 
 static void ResetClientVisualState() {
@@ -967,6 +1007,11 @@ static void UpdateStatusText() {
     }
 
     if (GetLocalScene() == net::SceneId::Arena) {
+        if (IsArenaVictoryActive()) {
+            gStatusText = TextFormat("Arena - victory! Returning to hub in %ds",
+                                     ArenaVictorySecondsLeft());
+            return;
+        }
         if (IsArenaWipePending()) {
             gStatusText = TextFormat("Arena - returning to hub in %ds", ArenaWipeSecondsLeft());
             return;
@@ -1570,7 +1615,7 @@ static void UpdateGame() {
 
     const Vector2 virtualMouse = GetVirtualMousePosition();
     const bool blockGameplayInput =
-        ShouldShowDeathPanel() || IsArenaWipePending() ||
+        ShouldShowDeathPanel() || IsArenaWipePending() || IsArenaVictoryActive() ||
         (gSpectating && GetLocalScene() == net::SceneId::Arena && IsLocalPlayerDead());
     const bool allowCameraInput =
         !gEditingName && !gChatExpanded && !IsMouseOverActionsPanel(virtualMouse) &&
@@ -1898,6 +1943,7 @@ static void DrawGame() {
     DrawDeathPanel();
     DrawSpectateHud();
     DrawArenaWipeOverlay();
+    DrawVictoryOverlay();
 
     gViewport.EndFrame();
 }

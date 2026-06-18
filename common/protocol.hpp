@@ -73,6 +73,7 @@ struct SessionSnapshot {
     uint32_t allDeadReturnAtTick = 0;
     uint32_t arenaJoinOpensAtTick = 0;
     uint32_t arenaSessionEndsAtTick = 0;
+    uint32_t arenaVictoryEndsAtTick = 0;
     std::vector<int> readyPlayerIds;
     std::vector<int> arenaResetPlayerIds;
     int hubPlayerCount = 0;

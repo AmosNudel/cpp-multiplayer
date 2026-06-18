@@ -1898,6 +1898,13 @@ void GameServer::SimulateTick() {
             }
 
             ProcessDeadEnemyRespawns(enemies_, players_, clients_, enemyMovement_, tick_);
+
+            if (arenaVictoryEndsAtTick_ == 0 && IsGoblinBossDefeated(enemies_)) {
+                arenaVictoryEndsAtTick_ = tick_ + kArenaVictoryDelayTicks;
+                allDeadReturnAtTick_ = 0;
+                std::cout << "[game] goblin boss defeated, returning to hub in "
+                          << kArenaVictoryDelaySeconds << "s\n";
+            }
         }
     }
 }
@@ -1973,6 +1980,7 @@ SessionSnapshot GameServer::BuildSessionSnapshot() const {
     session.allDeadReturnAtTick = allDeadReturnAtTick_;
     session.arenaJoinOpensAtTick = arenaJoinOpensAtTick_;
     session.arenaSessionEndsAtTick = arenaSessionEndsAtTick_;
+    session.arenaVictoryEndsAtTick = arenaVictoryEndsAtTick_;
     session.hubPlayerCount = CountPlayersInScene(SceneId::Hub);
     session.arenaPlayerCount = CountPlayersInScene(SceneId::Arena);
     for (const PlayerState& player : players_) {
@@ -2222,6 +2230,7 @@ void GameServer::StartArena() {
     sessionPhaseEndsAtTick_ = arenaSessionEndsAtTick_;
     arenaJoinOpensAtTick_ = tick_ + kArenaRejoinDelayTicks;
     allDeadReturnAtTick_ = 0;
+    arenaVictoryEndsAtTick_ = 0;
     ClearAllArenaReset();
     std::cout << "[game] arena " << (resumeExistingArena ? "resumed" : "started")
               << " with " << readyPlayerIds.size() << " players\n";
@@ -2252,6 +2261,7 @@ void GameServer::ResetArena() {
     allDeadReturnAtTick_ = 0;
     arenaJoinOpensAtTick_ = 0;
     arenaSessionEndsAtTick_ = 0;
+    arenaVictoryEndsAtTick_ = 0;
     ClearAllReady();
     ClearAllArenaReset();
     for (PlayerState& player : players_) {
@@ -2284,6 +2294,7 @@ void GameServer::EndArena() {
     allDeadReturnAtTick_ = 0;
     arenaJoinOpensAtTick_ = 0;
     arenaSessionEndsAtTick_ = 0;
+    arenaVictoryEndsAtTick_ = 0;
     for (PlayerState& player : players_) {
         player.arenaRejoinAtTick = 0;
     }
@@ -2367,6 +2378,11 @@ void GameServer::HandleSetArenaReset(int clientId, bool selected) {
 }
 
 void GameServer::UpdateSession() {
+    if (arenaVictoryEndsAtTick_ > 0 && tick_ >= arenaVictoryEndsAtTick_) {
+        EndArena();
+        return;
+    }
+
     if (arenaSessionEndsAtTick_ > 0 && tick_ >= arenaSessionEndsAtTick_) {
         EndArena();
         return;
@@ -2411,6 +2427,10 @@ void GameServer::UpdateSession() {
     }
 
     if (sessionPhase_ == SessionPhase::ArenaActive) {
+        if (arenaVictoryEndsAtTick_ > 0) {
+            return;
+        }
+
         int aliveArenaCount = 0;
         for (const PlayerState& player : players_) {
             if (player.sceneId != SceneId::Arena) {

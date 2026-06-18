@@ -147,6 +147,7 @@ private:
     uint32_t allDeadReturnAtTick_ = 0;
     uint32_t arenaJoinOpensAtTick_ = 0;
     uint32_t arenaSessionEndsAtTick_ = 0;
+    uint32_t arenaVictoryEndsAtTick_ = 0;
     uint32_t tick_ = 0;
     bool running_ = false;
 };

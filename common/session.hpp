@@ -26,6 +26,7 @@ inline constexpr int kLobbyDurationSeconds = 30;
 inline constexpr int kArenaDurationSeconds = 180;
 inline constexpr int kAllDeadReturnSeconds = 5;
 inline constexpr int kArenaDeathRespawnDelaySeconds = 20;
+inline constexpr int kArenaVictoryDelaySeconds = 5;
 inline constexpr int kArenaRejoinDelaySeconds = 30;
 inline constexpr uint32_t kLobbyDurationTicks =
     static_cast<uint32_t>(kLobbyDurationSeconds * kTickRate);
@@ -35,6 +36,8 @@ inline constexpr uint32_t kAllDeadReturnTicks =
     static_cast<uint32_t>(kAllDeadReturnSeconds * kTickRate);
 inline constexpr uint32_t kArenaDeathRespawnDelayTicks =
     static_cast<uint32_t>(kArenaDeathRespawnDelaySeconds * kTickRate);
+inline constexpr uint32_t kArenaVictoryDelayTicks =
+    static_cast<uint32_t>(kArenaVictoryDelaySeconds * kTickRate);
 inline constexpr uint32_t kArenaRejoinDelayTicks =
     static_cast<uint32_t>(kArenaRejoinDelaySeconds * kTickRate);
 

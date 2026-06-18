@@ -18,6 +18,7 @@ nlohmann::json SessionSnapshotToJson(const SessionSnapshot& session) {
         {"all_dead_return_at_tick", session.allDeadReturnAtTick},
         {"arena_join_opens_at_tick", session.arenaJoinOpensAtTick},
         {"arena_session_ends_at_tick", session.arenaSessionEndsAtTick},
+        {"arena_victory_ends_at_tick", session.arenaVictoryEndsAtTick},
         {"hub_player_count", session.hubPlayerCount},
         {"arena_player_count", session.arenaPlayerCount},
         {"ready_player_ids", nlohmann::json::array()},
@@ -39,6 +40,7 @@ SessionSnapshot SessionSnapshotFromJson(const nlohmann::json& json) {
     session.allDeadReturnAtTick = json.value("all_dead_return_at_tick", 0u);
     session.arenaJoinOpensAtTick = json.value("arena_join_opens_at_tick", 0u);
     session.arenaSessionEndsAtTick = json.value("arena_session_ends_at_tick", 0u);
+    session.arenaVictoryEndsAtTick = json.value("arena_victory_ends_at_tick", 0u);
     session.hubPlayerCount = json.value("hub_player_count", 0);
     session.arenaPlayerCount = json.value("arena_player_count", 0);
     if (json.contains("ready_player_ids")) {
