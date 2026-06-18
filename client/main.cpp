@@ -251,8 +251,7 @@ struct GoblinSprites {
         }
 
         const bool isBoss = net::IsGoblinBoss(enemy);
-        const float spriteHeight =
-            isBoss ? net::kGoblinBossSpriteHeight : net::kGoblinSpriteHeight;
+        const float spriteHeight = net::kGoblinSpriteHeight;
 
         if (isBoss && enemy.state != net::EntityState::Dead) {
             const float pulse = 0.85f + 0.15f * std::sin(static_cast<float>(serverTick) * 0.15f);
@@ -630,7 +629,7 @@ static void StopSpectating() {
 
 static Rectangle DeathPanelRect() {
     const int panelW = 300;
-    const int panelH = 190;
+    const int panelH = 210;
     return {
         static_cast<float>((GameViewport::kVirtualWidth - panelW) / 2),
         static_cast<float>((GameViewport::kVirtualHeight - panelH) / 2),
@@ -683,8 +682,7 @@ static Rectangle SpectateNextButtonRect() {
 
 static bool ShouldShowDeathPanel() {
     return gClient.GetState() == net::ClientConnectionState::Joined &&
-           GetLocalScene() == net::SceneId::Arena && IsLocalPlayerDead() && !IsArenaWipePending() &&
-           !gSpectating;
+           GetLocalScene() == net::SceneId::Arena && IsLocalPlayerDead() && !gSpectating;
 }
 
 static int ArenaDeathRespawnSecondsLeft() {
@@ -729,11 +727,17 @@ static void DrawDeathPanel() {
     DrawUiButton(respawnLabel, RespawnInArenaButtonRect(), respawnSecondsLeft == 0);
     DrawUiButton("Return to Hub", ReturnToHubButtonRect());
     DrawUiButton("Spectate", SpectateButtonRect(), GetSpectateTarget() != nullptr);
+
+    if (IsArenaWipePending()) {
+        DrawText(TextFormat("Team wipe - returning to hub in %ds", ArenaWipeSecondsLeft()),
+                 static_cast<int>(panel.x + 24), static_cast<int>(panel.y + 162), 14,
+                 Color{255, 180, 120, 255});
+    }
 }
 
 static void DrawArenaWipeOverlay() {
     if (gClient.GetState() != net::ClientConnectionState::Joined ||
-        GetLocalScene() != net::SceneId::Arena || !IsArenaWipePending()) {
+        GetLocalScene() != net::SceneId::Arena || !IsArenaWipePending() || IsLocalPlayerDead()) {
         return;
     }
 
@@ -893,9 +897,7 @@ static void DrawCombatTargetHighlights() {
             continue;
         }
         const Vector2 pos = DisplayPositionForEnemy(enemy);
-        const float highlightRadius =
-            net::IsGoblinBoss(enemy) ? net::kGoblinBossSpriteHeight * 0.35f
-                                     : net::kPlayerRadius + 10.0f;
+        const float highlightRadius = net::kPlayerRadius + 10.0f;
         DrawCircleLines(pos.x, pos.y, highlightRadius, Color{255, 220, 80, 220});
         DrawCircleLines(pos.x, pos.y, highlightRadius + 2.0f, Color{255, 220, 80, 100});
     }

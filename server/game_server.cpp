@@ -2423,7 +2423,8 @@ void GameServer::UpdateSession() {
 
         if (aliveArenaCount == 0 && CountPlayersInScene(SceneId::Arena) > 0) {
             if (allDeadReturnAtTick_ == 0) {
-                allDeadReturnAtTick_ = tick_ + kAllDeadReturnTicks;
+                allDeadReturnAtTick_ =
+                    tick_ + kArenaDeathRespawnDelayTicks + kAllDeadReturnTicks;
             }
             if (tick_ >= allDeadReturnAtTick_) {
                 ReturnAllArenaPlayersToHub();

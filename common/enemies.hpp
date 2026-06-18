@@ -9,7 +9,6 @@
 #include "common/config.hpp"
 #include "common/entity_state.hpp"
 #include "common/grid_map.hpp"
-#include "common/pathfinding.hpp"
 
 namespace net {
 
@@ -24,8 +23,6 @@ inline constexpr int kGoblinDeathFrameCount = 4;
 inline constexpr int kGoblinDeathAnimTicksPerFrame = 3;
 inline constexpr int kGoblinCorpseLifetimeTicks = 60;
 inline constexpr float kGoblinSpriteHeight = 128.0f;
-inline constexpr float kGoblinBossVisualScale = 2.0f;
-inline constexpr float kGoblinBossSpriteHeight = kGoblinSpriteHeight * kGoblinBossVisualScale;
 inline constexpr int kGoblinBossId = 100;
 inline constexpr int kGoblinBossVariantDamageNumerator = 5;
 inline constexpr int kGoblinBossVariantDamageDenominator = 4;

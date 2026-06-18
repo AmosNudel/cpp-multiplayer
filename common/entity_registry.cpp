@@ -74,7 +74,7 @@ void EntityRegistry::RegisterDefaults() {
         boss.stats.critDamageMultiplier = goblinStats.critDamageMultiplier;
         boss.stats.attackCooldownTicks = goblinStats.attackCooldownTicks;
         boss.stats.hitStunTicks = goblinStats.hitStunTicks;
-        boss.spriteHeight = kGoblinBossSpriteHeight;
+        boss.spriteHeight = kGoblinSpriteHeight;
         Register(boss);
     }
 }

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <random>
 #include <utility>
 
@@ -10,7 +9,6 @@
 #include "common/entity_defs.hpp"
 #include "common/entity_registry.hpp"
 #include "common/grid.hpp"
-#include "common/pathfinding.hpp"
 
 namespace net {
 namespace {
