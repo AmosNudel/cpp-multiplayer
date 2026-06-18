@@ -498,6 +498,8 @@ static int SkillCooldownSecondsLeft(int skillId) {
 }
 
 static std::optional<int> FindEnemyAtCell(int col, int row);
+static std::optional<int> FindEnemyAtWorldPos(Vector2 worldPos);
+static bool HasEnemyInSkillArea(int col, int row, int aoeRadius);
 
 static bool LocalPlayerNeedsSkillPick() {
     const net::PlayerState* local = FindLocalPlayer();
@@ -514,17 +516,19 @@ static void BeginSkillTargeting(net::SkillId skillId) {
     gPendingSkillId = net::SkillIdToInt(skillId);
 }
 
-static void BeginSkillTargetingForBranch(net::SkillBranch branch) {
-    const net::PlayerState* local = FindLocalPlayer();
-    if (local == nullptr) {
-        return;
-    }
-    const net::SkillId skill =
-        net::SkillForBranchTier(branch, local->skillTier + 1);
-    BeginSkillTargeting(skill);
+static std::pair<int, int> EnemyAnchorCell(const net::EnemyState& enemy) {
+    return {net::WorldToCellCol(enemy.x), net::WorldToCellRow(enemy.y)};
 }
 
-static std::pair<int, int> ResolveDamageSkillTarget(int col, int row) {
+static std::pair<int, int> ResolveDamageSkillTarget(int col, int row, Vector2 worldPos) {
+    if (const std::optional<int> enemyId = FindEnemyAtWorldPos(worldPos)) {
+        for (const net::EnemyState& enemy : gClient.GetEnemies()) {
+            if (enemy.id == *enemyId) {
+                return EnemyAnchorCell(enemy);
+            }
+        }
+    }
+
     if (FindEnemyAtCell(col, row).has_value()) {
         return {col, row};
     }
@@ -575,17 +579,32 @@ static Rectangle SkillButtonRect(int index) {
     };
 }
 
-static Rectangle BranchVoteButtonRect(int index) {
+static Rectangle LevelUpOverlayPanelRect() {
     const int panelW = 420;
     const int panelH = 180;
     const int panelX = (GameViewport::kVirtualWidth - panelW) / 2;
     const int panelY = (GameViewport::kVirtualHeight - panelH) / 2;
     return {
-        static_cast<float>(panelX + 20 + index * 130),
-        static_cast<float>(panelY + 100),
+        static_cast<float>(panelX),
+        static_cast<float>(panelY),
+        static_cast<float>(panelW),
+        static_cast<float>(panelH),
+    };
+}
+
+static Rectangle BranchVoteButtonRect(int index) {
+    const Rectangle panel = LevelUpOverlayPanelRect();
+    return {
+        panel.x + 20.0f + static_cast<float>(index) * 130.0f,
+        panel.y + 100.0f,
         120.0f,
         40.0f,
     };
+}
+
+static bool IsMouseOverLevelUpOverlay(Vector2 virtualPos) {
+    return LocalPlayerNeedsSkillPick() &&
+           CheckCollisionPointRec(virtualPos, LevelUpOverlayPanelRect());
 }
 
 static int SkillEffectFrame(uint32_t serverTick, uint32_t startTick) {
@@ -1374,10 +1393,11 @@ static void DrawLevelUpOverlay() {
     const net::SessionSnapshot& session = gClient.GetSession();
     const int pickTier = local != nullptr ? local->skillTier + 1 : 1;
 
-    const int panelW = 420;
-    const int panelH = 180;
-    const int panelX = (GameViewport::kVirtualWidth - panelW) / 2;
-    const int panelY = (GameViewport::kVirtualHeight - panelH) / 2;
+    const Rectangle panel = LevelUpOverlayPanelRect();
+    const int panelX = static_cast<int>(panel.x);
+    const int panelY = static_cast<int>(panel.y);
+    const int panelW = static_cast<int>(panel.width);
+    const int panelH = static_cast<int>(panel.height);
 
     DrawRectangle(0, 0, GameViewport::kVirtualWidth, GameViewport::kVirtualHeight,
                   Color{0, 0, 0, 140});
@@ -1504,6 +1524,44 @@ static std::optional<int> FindEnemyAtCell(int col, int row) {
     return std::nullopt;
 }
 
+static std::optional<int> FindEnemyAtWorldPos(Vector2 worldPos) {
+    std::optional<int> bestId;
+    float bestDistSq = net::kGridCellSize * net::kGridCellSize;
+
+    for (const net::EnemyState& enemy : gClient.GetEnemies()) {
+        if (enemy.state == net::EntityState::Dead) {
+            continue;
+        }
+
+        const net::EntityDef& def = net::DefaultEntityRegistry().MustFind(enemy.kind);
+        const float hitRadius = std::max(net::kGridCellSize * 0.5f,
+                                         static_cast<float>(def.spriteHeight) * 0.35f);
+        const Vector2 center = DisplayPositionForEnemy(enemy);
+        const float dx = center.x - worldPos.x;
+        const float dy = center.y - worldPos.y;
+        const float distSq = dx * dx + dy * dy;
+        if (distSq <= hitRadius * hitRadius &&
+            (!bestId.has_value() || distSq < bestDistSq)) {
+            bestDistSq = distSq;
+            bestId = enemy.id;
+        }
+    }
+
+    return bestId;
+}
+
+static bool HasEnemyInSkillArea(int col, int row, int aoeRadius) {
+    for (const net::EnemyState& enemy : gClient.GetEnemies()) {
+        if (enemy.state == net::EntityState::Dead) {
+            continue;
+        }
+        if (net::IsEnemyInSkillArea(enemy, col, row, aoeRadius)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void HandleMapClick() {
     if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         return;
@@ -1523,7 +1581,7 @@ static void HandleMapClick() {
         return;
     }
 #endif
-    if (IsMouseOverChatPanel(virtualPos)) {
+    if (IsMouseOverChatPanel(virtualPos) || IsMouseOverLevelUpOverlay(virtualPos)) {
         return;
     }
 
@@ -1539,6 +1597,8 @@ static void HandleMapClick() {
     if (!net::IsValidCell(col, row)) {
         return;
     }
+
+    const Vector2 worldPos = gWorldView.VirtualToWorld(virtualPos);
 
     if (GetLocalScene() == net::SceneId::Hub && net::IsPortalCell(col, row)) {
         const net::SessionSnapshot& session = gClient.GetSession();
@@ -1569,14 +1629,25 @@ static void HandleMapClick() {
     }
 
     if (gPendingSkillId >= 0 && GetLocalScene() == net::SceneId::Arena) {
+        const net::SkillDef& def = net::SkillDefFor(net::SkillIdFromInt(gPendingSkillId));
         int targetCol = col;
         int targetRow = row;
-        const net::SkillDef& def = net::SkillDefFor(net::SkillIdFromInt(gPendingSkillId));
         if (def.damage > 0) {
-            const std::pair<int, int> resolved = ResolveDamageSkillTarget(col, row);
+            const std::pair<int, int> resolved = ResolveDamageSkillTarget(col, row, worldPos);
             targetCol = resolved.first;
             targetRow = resolved.second;
+            if (!HasEnemyInSkillArea(targetCol, targetRow, def.aoeRadius)) {
+                return;
+            }
         }
+
+        const net::PlayerState* local = FindLocalPlayer();
+        if (local == nullptr ||
+            !net::IsCellInSkillRange(net::WorldToCellCol(local->x), net::WorldToCellRow(local->y),
+                                     targetCol, targetRow, def.rangeCells)) {
+            return;
+        }
+
         gClient.SendUseSkill(gPendingSkillId, targetCol, targetRow);
         gPendingSkillId = -1;
         return;
@@ -1587,6 +1658,10 @@ static void HandleMapClick() {
     }
 
     if (GetLocalScene() == net::SceneId::Arena) {
+        if (const std::optional<int> enemyId = FindEnemyAtWorldPos(worldPos)) {
+            gClient.SendAttackRequest(*enemyId);
+            return;
+        }
         if (const std::optional<int> enemyId = FindEnemyAtCell(col, row)) {
             gClient.SendAttackRequest(*enemyId);
             return;
@@ -1632,17 +1707,14 @@ static void HandleUiClicks() {
     if (LocalPlayerNeedsSkillPick()) {
         if (WasUiButtonPressed(BranchVoteButtonRect(0))) {
             gClient.SendVoteSkillBranch(net::SkillBranch::Dps);
-            BeginSkillTargetingForBranch(net::SkillBranch::Dps);
             return;
         }
         if (WasUiButtonPressed(BranchVoteButtonRect(1))) {
             gClient.SendVoteSkillBranch(net::SkillBranch::Shield);
-            BeginSkillTargetingForBranch(net::SkillBranch::Shield);
             return;
         }
         if (WasUiButtonPressed(BranchVoteButtonRect(2))) {
             gClient.SendVoteSkillBranch(net::SkillBranch::Support);
-            BeginSkillTargetingForBranch(net::SkillBranch::Support);
             return;
         }
     }
