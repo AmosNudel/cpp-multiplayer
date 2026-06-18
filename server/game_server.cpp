@@ -17,6 +17,8 @@
 #include "common/grid_map.hpp"
 #include "common/pathfinding.hpp"
 #include "common/session.hpp"
+#include "common/skills.hpp"
+#include "common/arena_waves.hpp"
 
 namespace net {
 namespace {
@@ -152,12 +154,13 @@ void StartBossComboCycle(EnemyState& enemy, EnemyMovementState& move, uint32_t t
     StartBossComboSwing(enemy, move, BossComboPhase::Swing1, 0, tick);
 }
 
-int BossSwingDamageForVariant(const CombatStats& stats, int variant) {
+int BossSwingDamageForVariant(const CombatStats& stats, int variant, int damageBonus = 0) {
     if (variant == 2) {
         return (stats.attackDamage * kGoblinBossVariantDamageNumerator) /
-               kGoblinBossVariantDamageDenominator;
+                   kGoblinBossVariantDamageDenominator +
+               damageBonus;
     }
-    return stats.attackDamage;
+    return stats.attackDamage + damageBonus;
 }
 
 void ApplyBossAoeDamage(const EnemyState& enemy, int damage, std::vector<PlayerState>& players,
@@ -209,7 +212,8 @@ void TryApplyBossComboSwingDamage(EnemyState& enemy, EnemyMovementState& move,
 
     move.bossComboSwingDamageDealt = true;
     const CombatStats& stats = DefaultEntityRegistry().StatsFor(enemy.kind);
-    const int damage = BossSwingDamageForVariant(stats, move.bossComboPattern[swingIndex]);
+    const int damage = BossSwingDamageForVariant(stats, move.bossComboPattern[swingIndex],
+                                                 enemy.damageBonus);
     ApplyBossAoeDamage(enemy, damage, players, tick);
 }
 
@@ -1098,13 +1102,17 @@ void UpdateGoblinBossCombat(EnemyState& enemy, EnemyMovementState& move,
 void TrySpawnGoblinBoss(std::vector<EnemyState>& enemies, std::vector<PlayerState>& players,
                         std::unordered_map<int, ConnectedClient>& clients,
                         std::unordered_map<int, EnemyMovementState>& enemyMovement,
-                        const GridMap& map, uint32_t tick) {
-    if (HasGoblinBoss(enemies) || !AllRegularGoblinsDefeated(enemies)) {
+                        const GridMap& map, uint32_t tick, int arenaPlayerCount) {
+    if (HasGoblinBoss(enemies) || HasLivingRegularGoblins(enemies)) {
         return;
     }
 
     const auto [spawnCol, spawnRow] = PickGoblinBossSpawnCell(map, enemies);
     EnemyState boss = CreateGoblinBossAt(kGoblinBossId, spawnCol, spawnRow);
+    const CombatStats& baseStats = DefaultEntityRegistry().StatsFor(kGoblinBossEntityId);
+    boss.hp = ScaleStatByExtraPlayers(baseStats.maxHp, arenaPlayerCount);
+    boss.damageBonus =
+        ScaleStatByExtraPlayers(baseStats.attackDamage, arenaPlayerCount) - baseStats.attackDamage;
     boss.stateStartTick = tick;
     boss.animStartTick = tick;
     enemies.push_back(boss);
@@ -1125,7 +1133,14 @@ void TrySpawnGoblinBoss(std::vector<EnemyState>& enemies, std::vector<PlayerStat
         StartGoblinChase(spawnedBoss, move, target, players, clients, enemies, map, tick);
     }
 
-    std::cout << "[game] goblin boss spawned at (" << spawnCol << ", " << spawnRow << ")\n";
+    const int extraPlayers = BossExtraPlayerCount(arenaPlayerCount);
+    std::cout << "[game] goblin boss spawned at (" << spawnCol << ", " << spawnRow
+              << ") hp=" << spawnedBoss.hp;
+    if (extraPlayers > 0) {
+        std::cout << " (+" << extraPlayers * kBossBonusStatPercentPerExtraPlayer
+                  << "% for " << arenaPlayerCount << " players)";
+    }
+    std::cout << "\n";
 }
 
 void RespawnEnemy(int enemyId, std::vector<EnemyState>& enemies,
@@ -1330,15 +1345,6 @@ void UpdatePlayerEntity(PlayerState& player, ConnectedClient& client,
     if (player.state == EntityState::Combat) {
         UpdatePlayerCombo(player, client, players, enemies, map, tick);
     }
-}
-
-void ProcessDeadEnemyRespawns(std::vector<EnemyState>& enemies, std::vector<PlayerState>& players,
-                              std::unordered_map<int, ConnectedClient>& clients,
-                              std::unordered_map<int, EnemyMovementState>& enemyMovement,
-                              uint32_t tick) {
-    (void)tick;
-    const GridMap& map = ArenaGridMap();
-    TrySpawnGoblinBoss(enemies, players, clients, enemyMovement, map, tick);
 }
 
 void UpdateEnemyEntity(EnemyState& enemy, EnemyMovementState& move,
@@ -1756,6 +1762,26 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             HandleRespawnInArena(incoming.clientId);
             break;
         }
+        case MessageType::VoteSkillBranchRequest: {
+            auto it = clients_.find(incoming.clientId);
+            if (it == clients_.end() || !it->second.hasJoined) {
+                return;
+            }
+
+            HandleVoteSkillBranch(incoming.clientId,
+                                  incoming.message.voteSkillBranchRequest.branch);
+            break;
+        }
+        case MessageType::UseSkillRequest: {
+            auto it = clients_.find(incoming.clientId);
+            if (it == clients_.end() || !it->second.hasJoined) {
+                return;
+            }
+
+            const UseSkillRequest& request = incoming.message.useSkillRequest;
+            HandleUseSkill(incoming.clientId, request.skillId, request.col, request.row);
+            break;
+        }
         case MessageType::CancelCombatRequest: {
             auto it = clients_.find(incoming.clientId);
             if (it == clients_.end() || !it->second.hasJoined) {
@@ -1862,6 +1888,14 @@ void GameServer::HandleDisconnect(int clientId, TransportKind transport) {
 
 void GameServer::SimulateTick() {
     UpdateSession();
+    UpdateSkillEffects();
+
+    std::unordered_map<int, int> enemyHpAtTickStart;
+    for (const EnemyState& enemy : enemies_) {
+        if (IsAlive(enemy.state)) {
+            enemyHpAtTickStart[enemy.id] = enemy.hp;
+        }
+    }
 
     for (PlayerState& player : players_) {
         auto clientIt = clients_.find(player.id);
@@ -1887,6 +1921,8 @@ void GameServer::SimulateTick() {
             player.x = std::clamp(player.x, margin, kWorldWidth - margin);
             player.y = std::clamp(player.y, margin, kWorldHeight - margin);
         }
+
+        SyncPlayerSkillCooldowns(player, clientIt->second);
     }
 
     if (sessionPhase_ == SessionPhase::ArenaActive) {
@@ -1897,7 +1933,14 @@ void GameServer::SimulateTick() {
                                   arenaMap, tick_);
             }
 
-            ProcessDeadEnemyRespawns(enemies_, players_, clients_, enemyMovement_, tick_);
+            for (const EnemyState& enemy : enemies_) {
+                const auto it = enemyHpAtTickStart.find(enemy.id);
+                if (it != enemyHpAtTickStart.end() && it->second > 0 && enemy.hp <= 0) {
+                    OnEnemyKilled(enemy);
+                }
+            }
+
+            ProcessArenaWaves();
 
             if (arenaVictoryEndsAtTick_ == 0 && IsGoblinBossDefeated(enemies_)) {
                 arenaVictoryEndsAtTick_ = tick_ + kArenaVictoryDelayTicks;
@@ -1983,6 +2026,12 @@ SessionSnapshot GameServer::BuildSessionSnapshot() const {
     session.arenaVictoryEndsAtTick = arenaVictoryEndsAtTick_;
     session.hubPlayerCount = CountPlayersInScene(SceneId::Hub);
     session.arenaPlayerCount = CountPlayersInScene(SceneId::Arena);
+    session.teamLevel = teamLevel_;
+    session.teamXp = teamXp_;
+    session.teamXpToNext = TeamXpToNextLevel(teamLevel_, teamXp_);
+    session.arenaWave = arenaWavesSpawned_;
+    session.arenaWaveCount = kArenaWaveCount;
+    session.skillEffects = skillEffects_;
     for (const PlayerState& player : players_) {
         if (player.sceneId == SceneId::Hub && player.isReady) {
             session.readyPlayerIds.push_back(player.id);
@@ -2214,16 +2263,9 @@ void GameServer::StartArena() {
     if (!resumeExistingArena) {
         enemies_.clear();
         enemyMovement_.clear();
-        enemies_ = CreateDefaultEnemies();
-        if (EnemiesShareTiles(enemies_)) {
-            std::cerr << "[game] warning: goblins spawned on shared tiles\n";
-        }
-        for (EnemyState& enemy : enemies_) {
-            enemy.stateStartTick = tick_;
-            enemy.animStartTick = tick_;
-            InitializeGoblinMovement(enemyMovement_[enemy.id], arenaMap, enemy, tick_);
-        }
         arenaSessionEndsAtTick_ = tick_ + kArenaDurationTicks;
+        BeginArenaProgression();
+        SpawnArenaWave(1);
     }
 
     sessionPhase_ = SessionPhase::ArenaActive;
@@ -2262,6 +2304,7 @@ void GameServer::ResetArena() {
     arenaJoinOpensAtTick_ = 0;
     arenaSessionEndsAtTick_ = 0;
     arenaVictoryEndsAtTick_ = 0;
+    ResetTeamProgression();
     ClearAllReady();
     ClearAllArenaReset();
     for (PlayerState& player : players_) {
@@ -2295,12 +2338,294 @@ void GameServer::EndArena() {
     arenaJoinOpensAtTick_ = 0;
     arenaSessionEndsAtTick_ = 0;
     arenaVictoryEndsAtTick_ = 0;
+    ResetTeamProgression();
     for (PlayerState& player : players_) {
         player.arenaRejoinAtTick = 0;
     }
     ClearAllReady();
     ClearAllArenaReset();
     std::cout << "[game] arena ended, players returned to hub\n";
+}
+
+void GameServer::ResetTeamProgression() {
+    teamLevel_ = 0;
+    teamXp_ = 0;
+    skillEffects_.clear();
+    arenaWavesSpawned_ = 0;
+    arenaWaveIntermissionEndsAtTick_ = 0;
+    for (PlayerState& player : players_) {
+        player.skillTier = 0;
+        player.unlockedSkillIds.clear();
+    }
+    for (auto& [clientId, client] : clients_) {
+        (void)clientId;
+        client.skillCooldownUntilTick.clear();
+    }
+}
+
+void GameServer::BeginArenaProgression() {
+    teamLevel_ = kArenaStartTeamLevel;
+    teamXp_ = 0;
+    skillEffects_.clear();
+    arenaWavesSpawned_ = 0;
+    arenaWaveIntermissionEndsAtTick_ = 0;
+    for (PlayerState& player : players_) {
+        player.skillTier = 0;
+        player.unlockedSkillIds.clear();
+    }
+    for (auto& [clientId, client] : clients_) {
+        (void)clientId;
+        client.skillCooldownUntilTick.clear();
+    }
+    std::cout << "[game] arena session started at team level " << teamLevel_ << "\n";
+}
+
+void GameServer::SpawnArenaWave(int waveIndex) {
+    if (waveIndex < 1 || waveIndex > kArenaWaveCount) {
+        return;
+    }
+
+    const int count = ArenaWaveGoblinCount(waveIndex);
+    const int firstId = NextEnemyId(enemies_);
+    std::vector<EnemyState> spawned = SpawnGoblinGroup(count, firstId, enemies_);
+    const GridMap& map = ArenaGridMap();
+    for (EnemyState& enemy : spawned) {
+        enemy.stateStartTick = tick_;
+        enemy.animStartTick = tick_;
+        enemies_.push_back(enemy);
+        InitializeGoblinMovement(enemyMovement_[enemy.id], map, enemy, tick_);
+    }
+    arenaWavesSpawned_ = waveIndex;
+    arenaWaveIntermissionEndsAtTick_ = 0;
+    std::cout << "[game] arena wave " << waveIndex << "/" << kArenaWaveCount << " spawned ("
+              << static_cast<int>(spawned.size()) << " goblins)\n";
+}
+
+void GameServer::PruneOrphanedEnemyMovement() {
+    for (auto it = enemyMovement_.begin(); it != enemyMovement_.end();) {
+        bool found = false;
+        for (const EnemyState& enemy : enemies_) {
+            if (enemy.id == it->first) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            it = enemyMovement_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void GameServer::ProcessArenaWaves() {
+    if (sessionPhase_ != SessionPhase::ArenaActive) {
+        return;
+    }
+    if (CountPlayersInScene(SceneId::Arena) == 0) {
+        return;
+    }
+    if (HasGoblinBoss(enemies_)) {
+        return;
+    }
+    if (HasLivingRegularGoblins(enemies_)) {
+        return;
+    }
+
+    if (arenaWaveIntermissionEndsAtTick_ > 0) {
+        if (tick_ < arenaWaveIntermissionEndsAtTick_) {
+            return;
+        }
+        arenaWaveIntermissionEndsAtTick_ = 0;
+    } else if (arenaWavesSpawned_ > 0 && arenaWavesSpawned_ < kArenaWaveCount) {
+        RemoveDeadRegularGoblins(enemies_);
+        PruneOrphanedEnemyMovement();
+        arenaWaveIntermissionEndsAtTick_ = tick_ + kArenaWaveIntermissionTicks;
+        return;
+    }
+
+    if (arenaWavesSpawned_ < kArenaWaveCount) {
+        RemoveDeadRegularGoblins(enemies_);
+        PruneOrphanedEnemyMovement();
+        SpawnArenaWave(arenaWavesSpawned_ + 1);
+        return;
+    }
+
+    const int arenaPlayerCount = CountPlayersInScene(SceneId::Arena);
+    TrySpawnGoblinBoss(enemies_, players_, clients_, enemyMovement_, ArenaGridMap(), tick_,
+                       arenaPlayerCount);
+}
+
+void GameServer::AwardTeamXp(int amount) {
+    if (sessionPhase_ != SessionPhase::ArenaActive || amount <= 0) {
+        return;
+    }
+
+    teamXp_ += amount;
+    while (teamLevel_ < kMaxTeamLevel &&
+           teamXp_ >= TeamXpThresholdForLevel(teamLevel_ + 1)) {
+        ++teamLevel_;
+        std::cout << "[game] team reached level " << teamLevel_ << "\n";
+    }
+}
+
+void GameServer::OnEnemyKilled(const EnemyState& enemy) {
+    if (!IsAlive(enemy.state) && enemy.hp <= 0) {
+        const int xp = IsGoblinBoss(enemy) ? kBossKillXp : kGoblinKillXp;
+        AwardTeamXp(xp);
+    }
+}
+
+void GameServer::HandleVoteSkillBranch(int clientId, SkillBranch branch) {
+    if (sessionPhase_ != SessionPhase::ArenaActive) {
+        return;
+    }
+
+    PlayerState* player = FindPlayer(players_, clientId);
+    if (player == nullptr || player->sceneId != SceneId::Arena) {
+        return;
+    }
+
+    if (player->skillTier >= teamLevel_) {
+        return;
+    }
+
+    const int nextTier = player->skillTier + 1;
+    const SkillId skill = SkillForBranchTier(branch, nextTier);
+    if (skill == SkillId::None) {
+        return;
+    }
+
+    player->unlockedSkillIds.push_back(SkillIdToInt(skill));
+    player->skillTier = nextTier;
+    std::cout << "[game] player " << clientId << " unlocked " << SkillIdName(skill) << "\n";
+}
+
+void GameServer::UpdateSkillEffects() {
+    skillEffects_.erase(
+        std::remove_if(skillEffects_.begin(), skillEffects_.end(),
+                       [this](const SkillEffectState& effect) {
+                           return tick_ >= effect.startTick + kThunderVfxDurationTicks;
+                       }),
+        skillEffects_.end());
+}
+
+void GameServer::SyncPlayerSkillCooldowns(PlayerState& player, ConnectedClient& client) {
+    player.skillCooldowns.clear();
+    player.skillCooldowns.reserve(client.skillCooldownUntilTick.size());
+    for (const auto& [skillId, readyAtTick] : client.skillCooldownUntilTick) {
+        if (readyAtTick > tick_) {
+            player.skillCooldowns.push_back(PlayerSkillCooldown{skillId, readyAtTick});
+        }
+    }
+}
+
+bool CellMatchesEntity(int col, int row, float entityX, float entityY) {
+    return WorldToCellCol(entityX) == col && WorldToCellRow(entityY) == row;
+}
+
+bool EnemyOnCell(const EnemyState& enemy, int col, int row) {
+    for (const std::pair<int, int>& cell : EnemyOccupiedCells(enemy)) {
+        if (cell.first == col && cell.second == row) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void GameServer::ApplySkillEffect(int casterId, SkillId skillId, int col, int row) {
+    const SkillDef& def = SkillDefFor(skillId);
+    if (def.id == SkillId::None) {
+        return;
+    }
+
+    PlayerState* caster = FindPlayer(players_, casterId);
+    if (caster == nullptr || caster->sceneId != SceneId::Arena ||
+        !IsAlive(caster->state)) {
+        return;
+    }
+
+    const GridMap& map = ArenaGridMap();
+    (void)map;
+    if (!net::IsValidCell(col, row)) {
+        return;
+    }
+
+    const int casterCol = WorldToCellCol(caster->x);
+    const int casterRow = WorldToCellRow(caster->y);
+    if (!IsCellInSkillRange(casterCol, casterRow, col, row, def.rangeCells)) {
+        return;
+    }
+
+    std::vector<std::pair<int, int>> targetCells;
+    CollectSkillTargetCells(col, row, def.aoeRadius, targetCells);
+
+    if (def.damage > 0) {
+        for (EnemyState& enemy : enemies_) {
+            if (!IsAlive(enemy.state)) {
+                continue;
+            }
+            for (const std::pair<int, int>& cell : targetCells) {
+                if (EnemyOnCell(enemy, cell.first, cell.second)) {
+                    ApplyDamageToEnemy(enemy, def.damage, tick_, false);
+                    break;
+                }
+            }
+        }
+    }
+
+    const CombatStats& playerStats = DefaultEntityRegistry().StatsFor(kPlayerEntityId);
+    for (PlayerState& player : players_) {
+        if (player.sceneId != SceneId::Arena || !IsAlive(player.state)) {
+            continue;
+        }
+        for (const std::pair<int, int>& cell : targetCells) {
+            if (!CellMatchesEntity(cell.first, cell.second, player.x, player.y)) {
+                continue;
+            }
+            if (def.heal > 0) {
+                player.hp = std::min(playerStats.maxHp, player.hp + def.heal);
+            }
+            if (def.shieldGrant > 0) {
+                player.shield = std::min(playerStats.maxShield, player.shield + def.shieldGrant);
+            }
+            break;
+        }
+    }
+
+    skillEffects_.push_back(
+        SkillEffectState{SkillIdToInt(skillId), col, row, casterId, tick_});
+}
+
+void GameServer::HandleUseSkill(int clientId, int skillId, int col, int row) {
+    if (sessionPhase_ != SessionPhase::ArenaActive) {
+        return;
+    }
+
+    PlayerState* player = FindPlayer(players_, clientId);
+    ConnectedClient* client = FindClient(clients_, clientId);
+    if (player == nullptr || client == nullptr || player->sceneId != SceneId::Arena ||
+        !IsAlive(player->state)) {
+        return;
+    }
+
+    const SkillId skill = SkillIdFromInt(skillId);
+    if (!SkillIsUnlocked(player->unlockedSkillIds, skill) || !SkillRequiresGridTarget(skill)) {
+        return;
+    }
+
+    const auto cooldownIt = client->skillCooldownUntilTick.find(skillId);
+    if (cooldownIt != client->skillCooldownUntilTick.end() && tick_ < cooldownIt->second) {
+        return;
+    }
+
+    ApplySkillEffect(clientId, skill, col, row);
+
+    const SkillDef& def = SkillDefFor(skill);
+    const uint32_t cooldownTicks =
+        static_cast<uint32_t>(def.cooldownSeconds * kTickRate);
+    client->skillCooldownUntilTick[skillId] = tick_ + cooldownTicks;
+    SyncPlayerSkillCooldowns(*player, *client);
 }
 
 void GameServer::HandleReturnToHub(int clientId) {

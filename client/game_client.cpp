@@ -261,6 +261,32 @@ void GameClient::SendRespawnInArena() {
     }
 }
 
+void GameClient::SendVoteSkillBranch(SkillBranch branch) {
+    if (state_ != ClientConnectionState::Joined) {
+        return;
+    }
+
+    const Message message = MakeVoteSkillBranchRequest(branch);
+    if (useWebSocket_) {
+        wsClient_.Send(message);
+    } else {
+        tcpClient_.Send(message);
+    }
+}
+
+void GameClient::SendUseSkill(int skillId, int col, int row) {
+    if (state_ != ClientConnectionState::Joined) {
+        return;
+    }
+
+    const Message message = MakeUseSkillRequest(skillId, col, row);
+    if (useWebSocket_) {
+        wsClient_.Send(message);
+    } else {
+        tcpClient_.Send(message);
+    }
+}
+
 void GameClient::SendChat(const std::string& text) {
     if (state_ != ClientConnectionState::Joined || text.empty()) {
         return;

@@ -7,9 +7,30 @@
 #include "common/entity_defs.hpp"
 #include "common/entity_registry.hpp"
 #include "common/session.hpp"
+#include "common/skills.hpp"
 
 namespace net {
 namespace {
+
+nlohmann::json SkillEffectStateToJson(const SkillEffectState& effect) {
+    return {
+        {"skill_id", effect.skillId},
+        {"col", effect.col},
+        {"row", effect.row},
+        {"caster_id", effect.casterId},
+        {"start_tick", effect.startTick},
+    };
+}
+
+SkillEffectState SkillEffectStateFromJson(const nlohmann::json& json) {
+    SkillEffectState effect;
+    effect.skillId = json.value("skill_id", 0);
+    effect.col = json.value("col", 0);
+    effect.row = json.value("row", 0);
+    effect.casterId = json.value("caster_id", 0);
+    effect.startTick = json.value("start_tick", 0u);
+    return effect;
+}
 
 nlohmann::json SessionSnapshotToJson(const SessionSnapshot& session) {
     nlohmann::json json = {
@@ -23,12 +44,21 @@ nlohmann::json SessionSnapshotToJson(const SessionSnapshot& session) {
         {"arena_player_count", session.arenaPlayerCount},
         {"ready_player_ids", nlohmann::json::array()},
         {"arena_reset_player_ids", nlohmann::json::array()},
+        {"team_level", session.teamLevel},
+        {"team_xp", session.teamXp},
+        {"team_xp_to_next", session.teamXpToNext},
+        {"arena_wave", session.arenaWave},
+        {"arena_wave_count", session.arenaWaveCount},
+        {"skill_effects", nlohmann::json::array()},
     };
     for (int playerId : session.readyPlayerIds) {
         json["ready_player_ids"].push_back(playerId);
     }
     for (int playerId : session.arenaResetPlayerIds) {
         json["arena_reset_player_ids"].push_back(playerId);
+    }
+    for (const SkillEffectState& effect : session.skillEffects) {
+        json["skill_effects"].push_back(SkillEffectStateToJson(effect));
     }
     return json;
 }
@@ -51,6 +81,16 @@ SessionSnapshot SessionSnapshotFromJson(const nlohmann::json& json) {
     if (json.contains("arena_reset_player_ids")) {
         for (const auto& playerIdJson : json.at("arena_reset_player_ids")) {
             session.arenaResetPlayerIds.push_back(playerIdJson.get<int>());
+        }
+    }
+    session.teamLevel = json.value("team_level", 0);
+    session.teamXp = json.value("team_xp", 0);
+    session.teamXpToNext = json.value("team_xp_to_next", TeamXpToNextLevel(0, 0));
+    session.arenaWave = json.value("arena_wave", 0);
+    session.arenaWaveCount = json.value("arena_wave_count", 0);
+    if (json.contains("skill_effects")) {
+        for (const auto& effectJson : json.at("skill_effects")) {
+            session.skillEffects.push_back(SkillEffectStateFromJson(effectJson));
         }
     }
     return session;
@@ -83,6 +123,21 @@ nlohmann::json PlayerStateToJson(const PlayerState& player) {
     if (player.arenaRejoinAtTick > 0) {
         json["arena_rejoin_at_tick"] = player.arenaRejoinAtTick;
     }
+    if (player.skillTier > 0) {
+        json["skill_tier"] = player.skillTier;
+    }
+    if (!player.unlockedSkillIds.empty()) {
+        json["unlocked_skill_ids"] = player.unlockedSkillIds;
+    }
+    if (!player.skillCooldowns.empty()) {
+        json["skill_cooldowns"] = nlohmann::json::array();
+        for (const PlayerSkillCooldown& cooldown : player.skillCooldowns) {
+            json["skill_cooldowns"].push_back({
+                {"skill_id", cooldown.skillId},
+                {"ready_at_tick", cooldown.readyAtTick},
+            });
+        }
+    }
     return json;
 }
 
@@ -106,6 +161,20 @@ PlayerState PlayerStateFromJson(const nlohmann::json& json) {
     player.isReady = json.value("is_ready", false);
     player.wantsArenaReset = json.value("wants_arena_reset", false);
     player.arenaRejoinAtTick = json.value("arena_rejoin_at_tick", 0u);
+    player.skillTier = json.value("skill_tier", 0);
+    if (json.contains("unlocked_skill_ids")) {
+        for (const auto& skillIdJson : json.at("unlocked_skill_ids")) {
+            player.unlockedSkillIds.push_back(skillIdJson.get<int>());
+        }
+    }
+    if (json.contains("skill_cooldowns")) {
+        for (const auto& cooldownJson : json.at("skill_cooldowns")) {
+            PlayerSkillCooldown cooldown;
+            cooldown.skillId = cooldownJson.value("skill_id", 0);
+            cooldown.readyAtTick = cooldownJson.value("ready_at_tick", 0u);
+            player.skillCooldowns.push_back(cooldown);
+        }
+    }
     return player;
 }
 
@@ -125,6 +194,9 @@ nlohmann::json EnemyStateToJson(const EnemyState& enemy) {
     if (enemy.targetId >= 0) {
         json["target_id"] = enemy.targetId;
     }
+    if (enemy.damageBonus > 0) {
+        json["damage_bonus"] = enemy.damageBonus;
+    }
     return json;
 }
 
@@ -141,6 +213,7 @@ EnemyState EnemyStateFromJson(const nlohmann::json& json) {
     enemy.facingRight = json.value("facing_right", true);
     enemy.hp = json.value("hp", DefaultEntityRegistry().StatsFor(enemy.kind).maxHp);
     enemy.targetId = json.value("target_id", -1);
+    enemy.damageBonus = json.value("damage_bonus", 0);
     return enemy;
 }
 
@@ -181,6 +254,8 @@ const char* MessageTypeName(MessageType type) {
         case MessageType::ReturnToHubRequest: return "return_to_hub_request";
         case MessageType::RejoinArenaRequest: return "rejoin_arena_request";
         case MessageType::RespawnInArenaRequest: return "respawn_in_arena_request";
+        case MessageType::VoteSkillBranchRequest: return "vote_skill_branch_request";
+        case MessageType::UseSkillRequest: return "use_skill_request";
         case MessageType::WorldState: return "world_state";
         case MessageType::PlayerLeft: return "player_left";
         case MessageType::Ping: return "ping";
@@ -205,6 +280,8 @@ MessageType ParseMessageType(const std::string& value) {
     if (value == "return_to_hub_request") return MessageType::ReturnToHubRequest;
     if (value == "rejoin_arena_request") return MessageType::RejoinArenaRequest;
     if (value == "respawn_in_arena_request") return MessageType::RespawnInArenaRequest;
+    if (value == "vote_skill_branch_request") return MessageType::VoteSkillBranchRequest;
+    if (value == "use_skill_request") return MessageType::UseSkillRequest;
     if (value == "world_state") return MessageType::WorldState;
     if (value == "player_left") return MessageType::PlayerLeft;
     if (value == "ping") return MessageType::Ping;
@@ -303,6 +380,22 @@ Message MakeRejoinArenaRequest() {
 Message MakeRespawnInArenaRequest() {
     Message message;
     message.type = MessageType::RespawnInArenaRequest;
+    return message;
+}
+
+Message MakeVoteSkillBranchRequest(SkillBranch branch) {
+    Message message;
+    message.type = MessageType::VoteSkillBranchRequest;
+    message.voteSkillBranchRequest.branch = branch;
+    return message;
+}
+
+Message MakeUseSkillRequest(int skillId, int col, int row) {
+    Message message;
+    message.type = MessageType::UseSkillRequest;
+    message.useSkillRequest.skillId = skillId;
+    message.useSkillRequest.col = col;
+    message.useSkillRequest.row = row;
     return message;
 }
 
@@ -412,6 +505,14 @@ std::string SerializeMessage(const Message& message) {
             break;
         case MessageType::RespawnInArenaRequest:
             break;
+        case MessageType::VoteSkillBranchRequest:
+            json["branch"] = SkillBranchName(message.voteSkillBranchRequest.branch);
+            break;
+        case MessageType::UseSkillRequest:
+            json["skill_id"] = message.useSkillRequest.skillId;
+            json["col"] = message.useSkillRequest.col;
+            json["row"] = message.useSkillRequest.row;
+            break;
         case MessageType::WorldState:
             json["tick"] = message.worldState.tick;
             json["players"] = nlohmann::json::array();
@@ -502,6 +603,15 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
             case MessageType::RejoinArenaRequest:
                 break;
             case MessageType::RespawnInArenaRequest:
+                break;
+            case MessageType::VoteSkillBranchRequest:
+                message.voteSkillBranchRequest.branch =
+                    ParseSkillBranch(json.value("branch", "dps"));
+                break;
+            case MessageType::UseSkillRequest:
+                message.useSkillRequest.skillId = json.value("skill_id", 0);
+                message.useSkillRequest.col = json.at("col").get<int>();
+                message.useSkillRequest.row = json.at("row").get<int>();
                 break;
             case MessageType::WorldState:
                 message.worldState.tick = json.at("tick").get<uint32_t>();

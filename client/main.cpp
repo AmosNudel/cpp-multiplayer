@@ -19,6 +19,8 @@
 #include "common/grid.hpp"
 #include "common/grid_map.hpp"
 #include "common/session.hpp"
+#include "common/skills.hpp"
+#include "common/arena_waves.hpp"
 
 #include <algorithm>
 #include <unordered_map>
@@ -50,6 +52,7 @@ static const char* kGoblinAttackVariantSpritePath =
     "assets/enemy/attack_variant1/Goblin/Attack2.png";
 static const char* kGoblinHitSpritePath = "assets/enemy/Goblin/Take Hit.png";
 static const char* kGoblinDeathSpritePath = "assets/enemy/Goblin/Death.png";
+static const char* kThunderVfxPath = "assets/vfx/Thunderstrike w blur.png";
 static const float kPlayerSpriteHeight = 96.0f;
 static constexpr float kGridScreenBottom = WorldView::kGridVirtualY + net::kWorldHeight;
 
@@ -283,6 +286,7 @@ static GameViewport gViewport;
 static WorldView gWorldView;
 static PlayerSprites gPlayerSprites;
 static GoblinSprites gGoblinSprites;
+static SpriteSheet gThunderVfx;
 static std::string gStatusText = "Press ENTER to connect";
 static std::string gPlayerName = "Player";
 static std::string gChatInput;
@@ -319,6 +323,7 @@ static std::unordered_map<int, EntityVisualState> gPlayerVisuals;
 static std::unordered_map<int, EntityVisualState> gEnemyVisuals;
 static std::vector<FloatingDamage> gFloatingDamage;
 static uint32_t gLastSyncedTick = 0;
+static int gPendingSkillId = -1;
 
 static constexpr double kCombatHitFlashDuration = 0.12;
 static constexpr double kFloatingDamageDuration = 0.9;
@@ -456,6 +461,89 @@ static bool IsLocalPlayerDead() {
         return local->state == net::EntityState::Dead;
     }
     return false;
+}
+
+static Color SkillTintFor(net::SkillId skillId) {
+    const net::SkillDef& def = net::SkillDefFor(skillId);
+    switch (def.branch) {
+        case net::SkillBranch::Dps:
+            return Color{255, 120, 60, 255};
+        case net::SkillBranch::Shield:
+            return Color{90, 160, 255, 255};
+        case net::SkillBranch::Support:
+            return Color{90, 230, 120, 255};
+    }
+    return WHITE;
+}
+
+static bool IsSkillOnCooldown(int skillId) {
+    const net::PlayerState* local = FindLocalPlayer();
+    if (local == nullptr) {
+        return false;
+    }
+    const uint32_t tick = gClient.GetServerTick();
+    for (const net::PlayerSkillCooldown& cooldown : local->skillCooldowns) {
+        if (cooldown.skillId == skillId && cooldown.readyAtTick > tick) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int SkillCooldownSecondsLeft(int skillId) {
+    const net::PlayerState* local = FindLocalPlayer();
+    if (local == nullptr) {
+        return 0;
+    }
+    const uint32_t tick = gClient.GetServerTick();
+    for (const net::PlayerSkillCooldown& cooldown : local->skillCooldowns) {
+        if (cooldown.skillId == skillId && cooldown.readyAtTick > tick) {
+            return static_cast<int>((cooldown.readyAtTick - tick + net::kTickRate - 1) /
+                                    net::kTickRate);
+        }
+    }
+    return 0;
+}
+
+static bool LocalPlayerNeedsSkillPick() {
+    const net::PlayerState* local = FindLocalPlayer();
+    if (local == nullptr || GetLocalScene() != net::SceneId::Arena) {
+        return false;
+    }
+    return local->skillTier < gClient.GetSession().teamLevel;
+}
+
+static Rectangle SkillButtonRect(int index) {
+    const Rectangle panel = ActionsPanelRect();
+    return {
+        panel.x + 130.0f + static_cast<float>(index) * 108.0f,
+        panel.y + 28.0f,
+        100.0f,
+        36.0f,
+    };
+}
+
+static Rectangle BranchVoteButtonRect(int index) {
+    const int panelW = 420;
+    const int panelH = 180;
+    const int panelX = (GameViewport::kVirtualWidth - panelW) / 2;
+    const int panelY = (GameViewport::kVirtualHeight - panelH) / 2;
+    return {
+        static_cast<float>(panelX + 20 + index * 130),
+        static_cast<float>(panelY + 100),
+        120.0f,
+        40.0f,
+    };
+}
+
+static int SkillEffectFrame(uint32_t serverTick, uint32_t startTick) {
+    if (serverTick < startTick) {
+        return 0;
+    }
+    const uint32_t elapsed = serverTick - startTick;
+    const int frame =
+        static_cast<int>(elapsed / static_cast<uint32_t>(net::kThunderVfxTicksPerFrame));
+    return frame >= net::kThunderVfxFrameCount ? net::kThunderVfxFrameCount - 1 : frame;
 }
 
 static bool IsArenaWipePending() {
@@ -800,6 +888,7 @@ static void ResetClientVisualState() {
     gEnemyVisuals.clear();
     gFloatingDamage.clear();
     gLastSyncedTick = 0;
+    gPendingSkillId = -1;
 }
 
 static Vector2 InterpolatedPosition(const EntityVisualState& visual) {
@@ -1018,7 +1107,15 @@ static void UpdateStatusText() {
         }
 
         const int secondsLeft = ArenaSecondsLeft();
-        gStatusText = TextFormat("Arena - %d:%02d remaining", secondsLeft / 60, secondsLeft % 60);
+        const net::SessionSnapshot& session = gClient.GetSession();
+        const int nextThreshold = session.teamLevel >= net::kMaxTeamLevel
+                                      ? session.teamXp
+                                      : net::TeamXpThresholdForLevel(session.teamLevel + 1);
+        gStatusText = TextFormat("Arena - %d:%02d | Wave %d/%d | Team Lv%d (%d/%d XP)",
+                                 secondsLeft / 60, secondsLeft % 60, session.arenaWave,
+                                 session.arenaWaveCount > 0 ? session.arenaWaveCount
+                                                            : net::kArenaWaveCount,
+                                 session.teamLevel, session.teamXp, nextThreshold);
         return;
     }
 
@@ -1184,6 +1281,90 @@ static void DrawActionsPanel() {
     const Rectangle panel = ActionsPanelRect();
     DrawText("Actions", static_cast<int>(panel.x), static_cast<int>(panel.y), 18, LIGHTGRAY);
     DrawUiButton("Disengage", DisengageButtonRect(), IsLocalPlayerInCombat());
+
+    if (GetLocalScene() != net::SceneId::Arena) {
+        return;
+    }
+
+    const net::SessionSnapshot& session = gClient.GetSession();
+    const int nextThreshold = session.teamLevel >= net::kMaxTeamLevel
+                                  ? session.teamXp
+                                  : net::TeamXpThresholdForLevel(session.teamLevel + 1);
+    DrawText(TextFormat("Team Lv%d  %d/%d XP", session.teamLevel, session.teamXp, nextThreshold),
+             static_cast<int>(panel.x + 250.0f), static_cast<int>(panel.y), 16, YELLOW);
+
+    int buttonIndex = 0;
+    const net::PlayerState* local = FindLocalPlayer();
+    if (local != nullptr) {
+        for (int skillId : local->unlockedSkillIds) {
+            const net::SkillId skill = net::SkillIdFromInt(skillId);
+            const net::SkillDef& def = net::SkillDefFor(skill);
+            const bool onCooldown = IsSkillOnCooldown(skillId);
+            const bool selected = gPendingSkillId == skillId;
+            const Rectangle button = SkillButtonRect(buttonIndex);
+            DrawUiButton(def.displayName, button, !onCooldown);
+            if (selected) {
+                DrawRectangleLinesEx(button, 2.0f, SkillTintFor(skill));
+            }
+            if (onCooldown) {
+                const int secondsLeft = SkillCooldownSecondsLeft(skillId);
+                DrawText(TextFormat("%ds", secondsLeft),
+                         static_cast<int>(button.x + button.width - 28.0f),
+                         static_cast<int>(button.y + 10.0f), 14, GRAY);
+            }
+            ++buttonIndex;
+        }
+    }
+
+    if (gPendingSkillId >= 0) {
+        DrawText("Click a grid tile to cast skill (ESC to cancel)",
+                 static_cast<int>(panel.x), static_cast<int>(panel.y + 72.0f), 14, SKYBLUE);
+    }
+}
+
+static void DrawLevelUpOverlay() {
+    if (!LocalPlayerNeedsSkillPick() || IsLocalPlayerDead()) {
+        return;
+    }
+
+    const net::PlayerState* local = FindLocalPlayer();
+    const net::SessionSnapshot& session = gClient.GetSession();
+    const int pickTier = local != nullptr ? local->skillTier + 1 : 1;
+
+    const int panelW = 420;
+    const int panelH = 180;
+    const int panelX = (GameViewport::kVirtualWidth - panelW) / 2;
+    const int panelY = (GameViewport::kVirtualHeight - panelH) / 2;
+
+    DrawRectangle(0, 0, GameViewport::kVirtualWidth, GameViewport::kVirtualHeight,
+                  Color{0, 0, 0, 140});
+    DrawRectangle(panelX, panelY, panelW, panelH, Color{28, 30, 38, 255});
+    DrawRectangleLines(panelX, panelY, panelW, panelH, Color{82, 88, 104, 255});
+    DrawText(TextFormat("Team Level %d - pick your skill (tier %d)", session.teamLevel, pickTier),
+             panelX + 20, panelY + 20, 20, RAYWHITE);
+    DrawText("Each player chooses their own branch",
+             panelX + 20, panelY + 48, 16, GRAY);
+
+    DrawUiButton("DPS", BranchVoteButtonRect(0));
+    DrawUiButton("Shield", BranchVoteButtonRect(1));
+    DrawUiButton("Support", BranchVoteButtonRect(2));
+}
+
+static void DrawSkillEffects() {
+    if (!gThunderVfx.loaded) {
+        return;
+    }
+
+    const uint32_t tick = gClient.GetServerTick();
+    for (const net::SkillEffectState& effect : gClient.GetSession().skillEffects) {
+        const net::SkillId skillId = net::SkillIdFromInt(effect.skillId);
+        const int frame = SkillEffectFrame(tick, effect.startTick);
+        const Vector2 center = {
+            net::CellCenterX(effect.col),
+            net::CellCenterY(effect.row),
+        };
+        gThunderVfx.Draw(center, SkillTintFor(skillId), frame, true, 96.0f);
+    }
 }
 
 static std::string TruncateToWidth(const std::string& text, int maxWidth, int fontSize) {
@@ -1344,6 +1525,12 @@ static void HandleMapClick() {
         return;
     }
 
+    if (gPendingSkillId >= 0 && GetLocalScene() == net::SceneId::Arena) {
+        gClient.SendUseSkill(gPendingSkillId, col, row);
+        gPendingSkillId = -1;
+        return;
+    }
+
     if (!GetActiveMap().IsWalkable(col, row)) {
         return;
     }
@@ -1395,6 +1582,38 @@ static void HandleUiClicks() {
         WasUiButtonPressed(DisengageButtonRect(), IsLocalPlayerInCombat())) {
         gClient.SendDisengage();
         return;
+    }
+
+    const net::SessionSnapshot& session = gClient.GetSession();
+    if (LocalPlayerNeedsSkillPick()) {
+        if (WasUiButtonPressed(BranchVoteButtonRect(0))) {
+            gClient.SendVoteSkillBranch(net::SkillBranch::Dps);
+            return;
+        }
+        if (WasUiButtonPressed(BranchVoteButtonRect(1))) {
+            gClient.SendVoteSkillBranch(net::SkillBranch::Shield);
+            return;
+        }
+        if (WasUiButtonPressed(BranchVoteButtonRect(2))) {
+            gClient.SendVoteSkillBranch(net::SkillBranch::Support);
+            return;
+        }
+    }
+
+    if (gClient.GetState() == net::ClientConnectionState::Joined &&
+        GetLocalScene() == net::SceneId::Arena && !IsLocalPlayerDead()) {
+        const net::PlayerState* local = FindLocalPlayer();
+        if (local != nullptr) {
+            int skillButtonIndex = 0;
+            for (int skillId : local->unlockedSkillIds) {
+                if (WasUiButtonPressed(SkillButtonRect(skillButtonIndex),
+                                       !IsSkillOnCooldown(skillId))) {
+                    gPendingSkillId = (gPendingSkillId == skillId) ? -1 : skillId;
+                    return;
+                }
+                ++skillButtonIndex;
+            }
+        }
     }
 
     if (gSpectating && GetLocalScene() == net::SceneId::Arena && IsLocalPlayerDead()) {
@@ -1565,6 +1784,17 @@ static void DrawGridHighlights() {
                    net::IsResetArenaCell(hoverCol, hoverRow)) {
             hoverColor = IsArenaSessionRunning() ? Color{255, 120, 80, 90}
                                                  : Color{160, 90, 70, 50};
+        } else if (gPendingSkillId >= 0 && GetLocalScene() == net::SceneId::Arena) {
+            const net::SkillId skill = net::SkillIdFromInt(gPendingSkillId);
+            const net::SkillDef& def = net::SkillDefFor(skill);
+            const net::PlayerState* local = FindLocalPlayer();
+            bool inRange = false;
+            if (local != nullptr) {
+                inRange = net::IsCellInSkillRange(net::WorldToCellCol(local->x),
+                                                  net::WorldToCellRow(local->y), hoverCol,
+                                                  hoverRow, def.rangeCells);
+            }
+            hoverColor = inRange ? Color{120, 200, 255, 90} : Color{180, 80, 80, 70};
         }
         DrawRectangleRec(CellWorldRect(hoverCol, hoverRow), hoverColor);
     }
@@ -1636,12 +1866,20 @@ static void UpdateGame() {
 
 #if !defined(PLATFORM_WEB)
     if (IsKeyPressed(KEY_ESCAPE)) {
-        gOptionsOpen = !gOptionsOpen;
+        if (gPendingSkillId >= 0) {
+            gPendingSkillId = -1;
+        } else {
+            gOptionsOpen = !gOptionsOpen;
+        }
     }
 #else
-    if (IsKeyPressed(KEY_ESCAPE) && gChatExpanded) {
-        gChatExpanded = false;
-        gChatInput.clear();
+    if (IsKeyPressed(KEY_ESCAPE)) {
+        if (gPendingSkillId >= 0) {
+            gPendingSkillId = -1;
+        } else if (gChatExpanded) {
+            gChatExpanded = false;
+            gChatInput.clear();
+        }
     }
 #endif
 
@@ -1866,6 +2104,7 @@ static void DrawGame() {
                        static_cast<int>(net::kWorldHeight), Color{70, 76, 92, 255});
     DrawGridHighlights();
     DrawCombatTargetHighlights();
+    DrawSkillEffects();
     DrawEnemies();
 
     const int localPlayerId = gClient.GetLocalPlayerId();
@@ -1944,6 +2183,7 @@ static void DrawGame() {
     DrawSpectateHud();
     DrawArenaWipeOverlay();
     DrawVictoryOverlay();
+    DrawLevelUpOverlay();
 
     gViewport.EndFrame();
 }
@@ -1960,7 +2200,9 @@ int main() {
     gViewport.Init();
     gPlayerSprites.Load();
     gGoblinSprites.Load();
+    gThunderVfx.Load(ResolveAssetPath(kThunderVfxPath).c_str(), net::kThunderVfxFrameCount);
     emscripten_set_main_loop(MainLoop, 0, 1);
+    gThunderVfx.Unload();
     gGoblinSprites.Unload();
     gPlayerSprites.Unload();
     gViewport.Shutdown();
@@ -1974,6 +2216,7 @@ int main() {
     gViewport.Init();
     gPlayerSprites.Load();
     gGoblinSprites.Load();
+    gThunderVfx.Load(ResolveAssetPath(kThunderVfxPath).c_str(), net::kThunderVfxFrameCount);
 
     while (!WindowShouldClose()) {
         UpdateGame();
@@ -1981,6 +2224,7 @@ int main() {
     }
 
     gClient.Disconnect();
+    gThunderVfx.Unload();
     gGoblinSprites.Unload();
     gPlayerSprites.Unload();
     gViewport.Shutdown();

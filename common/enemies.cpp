@@ -257,6 +257,64 @@ EnemyState CreateGoblinAt(int id, int col, int row) {
     return goblin;
 }
 
+int NextEnemyId(const std::vector<EnemyState>& enemies) {
+    int maxId = 0;
+    for (const EnemyState& enemy : enemies) {
+        if (enemy.id > maxId) {
+            maxId = enemy.id;
+        }
+    }
+    if (maxId >= kGoblinBossId) {
+        return maxId + 1;
+    }
+    return maxId < kDefaultGoblinId ? kDefaultGoblinId : maxId + 1;
+}
+
+std::vector<EnemyState> SpawnGoblinGroup(int count, int firstId,
+                                         const std::vector<EnemyState>& existing) {
+    const GridMap& map = ArenaGridMap();
+    const auto [playerCol, playerRow] = ResolvePlayerSpawnCell(map);
+    std::vector<std::pair<int, int>> spawnPoints =
+        CollectGoblinSpawnPoints(map, playerCol, playerRow);
+
+    std::shuffle(spawnPoints.begin(), spawnPoints.end(), GoblinSpawnRng());
+
+    std::vector<EnemyState> spawned;
+    std::vector<EnemyState> occupied = existing;
+    spawned.reserve(static_cast<size_t>(count));
+
+    for (const std::pair<int, int>& cell : spawnPoints) {
+        if (static_cast<int>(spawned.size()) >= count) {
+            break;
+        }
+        if (!IsValidGoblinSpawnCell(cell.first, cell.second, map, playerCol, playerRow, occupied,
+                                    -1)) {
+            continue;
+        }
+        const int id = firstId + static_cast<int>(spawned.size());
+        spawned.push_back(CreateGoblinAt(id, cell.first, cell.second));
+        occupied.push_back(spawned.back());
+    }
+
+    for (const std::pair<int, int>& cell : spawnPoints) {
+        if (static_cast<int>(spawned.size()) >= count) {
+            break;
+        }
+        if (IsCellOccupiedByEnemy(cell.first, cell.second, occupied, -1)) {
+            continue;
+        }
+        if (ManhattanCellDistance(cell.first, cell.second, playerCol, playerRow) <
+            kGoblinMinSpawnDistanceFromPlayer) {
+            continue;
+        }
+        const int id = firstId + static_cast<int>(spawned.size());
+        spawned.push_back(CreateGoblinAt(id, cell.first, cell.second));
+        occupied.push_back(spawned.back());
+    }
+
+    return spawned;
+}
+
 std::vector<EnemyState> CreateDefaultEnemies() {
     const GridMap& map = ArenaGridMap();
     const auto [playerCol, playerRow] = ResolvePlayerSpawnCell(map);
@@ -307,6 +365,24 @@ bool IsGoblinBoss(const EnemyState& enemy) {
 
 bool IsRegularGoblin(const EnemyState& enemy) {
     return enemy.kind == kGoblinEntityId;
+}
+
+bool HasLivingRegularGoblins(const std::vector<EnemyState>& enemies) {
+    for (const EnemyState& enemy : enemies) {
+        if (IsRegularGoblin(enemy) && IsAlive(enemy.state)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void RemoveDeadRegularGoblins(std::vector<EnemyState>& enemies) {
+    enemies.erase(std::remove_if(enemies.begin(), enemies.end(),
+                                 [](const EnemyState& enemy) {
+                                     return IsRegularGoblin(enemy) &&
+                                            enemy.state == EntityState::Dead;
+                                 }),
+                  enemies.end());
 }
 
 std::vector<std::pair<int, int>> EnemyOccupiedCells(const EnemyState& enemy) {

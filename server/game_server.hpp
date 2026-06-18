@@ -10,6 +10,8 @@
 
 #include "common/protocol.hpp"
 #include "common/session.hpp"
+#include "common/skills.hpp"
+#include "common/arena_waves.hpp"
 #include "server/tcp_listener.hpp"
 #include "server/ws_listener.hpp"
 
@@ -75,6 +77,7 @@ struct ConnectedClient {
     float disengageTargetY = 0.0f;
     int pendingMoveCol = -1;
     int pendingMoveRow = -1;
+    std::unordered_map<int, uint32_t> skillCooldownUntilTick;
 };
 
 class GameServer {
@@ -108,6 +111,8 @@ private:
     void HandleReturnToHub(int clientId);
     void HandleRejoinArena(int clientId);
     void HandleRespawnInArena(int clientId);
+    void HandleVoteSkillBranch(int clientId, SkillBranch branch);
+    void HandleUseSkill(int clientId, int skillId, int col, int row);
     void ReturnAllArenaPlayersToHub();
     bool CanPlayerRejoinArena(const PlayerState& player) const;
     bool CanPlayerRespawnInArena(const PlayerState& player) const;
@@ -129,6 +134,16 @@ private:
     bool HasActiveArenaSession() const;
     void ResetPlayerForScene(PlayerState& player, ConnectedClient* client, SceneId scene,
                              int spawnCol, int spawnRow);
+    void ResetTeamProgression();
+    void BeginArenaProgression();
+    void ProcessArenaWaves();
+    void SpawnArenaWave(int waveIndex);
+    void PruneOrphanedEnemyMovement();
+    void AwardTeamXp(int amount);
+    void OnEnemyKilled(const EnemyState& enemy);
+    void ApplySkillEffect(int casterId, SkillId skillId, int col, int row);
+    void UpdateSkillEffects();
+    void SyncPlayerSkillCooldowns(PlayerState& player, ConnectedClient& client);
     uint32_t NowMs() const;
 
     TcpListener tcpListener_;
@@ -148,6 +163,11 @@ private:
     uint32_t arenaJoinOpensAtTick_ = 0;
     uint32_t arenaSessionEndsAtTick_ = 0;
     uint32_t arenaVictoryEndsAtTick_ = 0;
+    int teamLevel_ = 0;
+    int teamXp_ = 0;
+    std::vector<SkillEffectState> skillEffects_;
+    int arenaWavesSpawned_ = 0;
+    uint32_t arenaWaveIntermissionEndsAtTick_ = 0;
     uint32_t tick_ = 0;
     bool running_ = false;
 };

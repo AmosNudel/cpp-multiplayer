@@ -33,6 +33,7 @@ add_library(net_common STATIC
     common/enemies.cpp
     common/combat.cpp
     common/entity_registry.cpp
+    common/skills.cpp
 )
 target_include_directories(net_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(net_common PUBLIC nlohmann_json::nlohmann_json)

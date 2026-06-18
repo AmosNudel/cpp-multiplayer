@@ -53,6 +53,7 @@ struct EnemyState {
     int targetId = -1;
     uint32_t lastAttackTick = 0;
     bool attackDamageDealt = false;
+    int damageBonus = 0;
 };
 
 std::pair<int, int> ResolvePlayerSpawnCell(const GridMap& map);
@@ -67,6 +68,11 @@ std::vector<std::pair<int, int>> BuildGoblinPatrolWaypoints(const GridMap& map, 
                                                              int anchorRow);
 std::vector<std::pair<int, int>> AllocateSpawnCells(const GridMap& map, int count);
 std::vector<EnemyState> CreateDefaultEnemies();
+std::vector<EnemyState> SpawnGoblinGroup(int count, int firstId,
+                                         const std::vector<EnemyState>& existing);
+int NextEnemyId(const std::vector<EnemyState>& enemies);
+bool HasLivingRegularGoblins(const std::vector<EnemyState>& enemies);
+void RemoveDeadRegularGoblins(std::vector<EnemyState>& enemies);
 EnemyState CreateGoblinAt(int id, int col, int row);
 EnemyState CreateGoblinBossAt(int id, int col, int row);
 bool IsGoblinBoss(const EnemyState& enemy);

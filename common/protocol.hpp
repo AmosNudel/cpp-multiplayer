@@ -11,6 +11,7 @@
 #include "common/enemies.hpp"
 #include "common/entity_state.hpp"
 #include "common/session.hpp"
+#include "common/skills.hpp"
 
 namespace net {
 
@@ -28,6 +29,8 @@ enum class MessageType {
     ReturnToHubRequest,
     RejoinArenaRequest,
     RespawnInArenaRequest,
+    VoteSkillBranchRequest,
+    UseSkillRequest,
     WorldState,
     PlayerLeft,
     Ping,
@@ -67,6 +70,29 @@ struct RejoinArenaRequest {};
 
 struct RespawnInArenaRequest {};
 
+struct VoteSkillBranchRequest {
+    SkillBranch branch = SkillBranch::Dps;
+};
+
+struct UseSkillRequest {
+    int skillId = 0;
+    int col = 0;
+    int row = 0;
+};
+
+struct SkillEffectState {
+    int skillId = 0;
+    int col = 0;
+    int row = 0;
+    int casterId = 0;
+    uint32_t startTick = 0;
+};
+
+struct PlayerSkillCooldown {
+    int skillId = 0;
+    uint32_t readyAtTick = 0;
+};
+
 struct SessionSnapshot {
     SessionPhase phase = SessionPhase::HubIdle;
     uint32_t phaseEndsAtTick = 0;
@@ -78,6 +104,12 @@ struct SessionSnapshot {
     std::vector<int> arenaResetPlayerIds;
     int hubPlayerCount = 0;
     int arenaPlayerCount = 0;
+    int teamLevel = 0;
+    int teamXp = 0;
+    int teamXpToNext = 0;
+    int arenaWave = 0;
+    int arenaWaveCount = 0;
+    std::vector<SkillEffectState> skillEffects;
 };
 
 struct PlayerState {
@@ -99,6 +131,9 @@ struct PlayerState {
     bool isReady = false;
     bool wantsArenaReset = false;
     uint32_t arenaRejoinAtTick = 0;
+    int skillTier = 0;
+    std::vector<int> unlockedSkillIds;
+    std::vector<PlayerSkillCooldown> skillCooldowns;
 };
 
 struct JoinRequest {
@@ -161,6 +196,8 @@ struct Message {
     ReturnToHubRequest returnToHubRequest;
     RejoinArenaRequest rejoinArenaRequest;
     RespawnInArenaRequest respawnInArenaRequest;
+    VoteSkillBranchRequest voteSkillBranchRequest;
+    UseSkillRequest useSkillRequest;
     WorldState worldState;
     PlayerLeft playerLeft;
     PingMessage ping;
@@ -187,6 +224,8 @@ Message MakeSetArenaResetRequest(bool selected);
 Message MakeReturnToHubRequest();
 Message MakeRejoinArenaRequest();
 Message MakeRespawnInArenaRequest();
+Message MakeVoteSkillBranchRequest(SkillBranch branch);
+Message MakeUseSkillRequest(int skillId, int col, int row);
 Message MakeWorldState(uint32_t tick, const std::vector<PlayerState>& players,
                        const std::vector<EnemyState>& enemies,
                        const SessionSnapshot& session);

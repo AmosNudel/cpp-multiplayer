@@ -38,6 +38,8 @@ public:
     void SendReturnToHub();
     void SendRejoinArena();
     void SendRespawnInArena();
+    void SendVoteSkillBranch(net::SkillBranch branch);
+    void SendUseSkill(int skillId, int col, int row);
     void SendChat(const std::string& text);
 
     ClientConnectionState GetState() const { return state_; }
