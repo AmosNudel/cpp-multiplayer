@@ -114,10 +114,7 @@ bool IsPatrolGoalBlocked(int col, int row, int enemyId, const std::vector<EnemyS
 }
 
 bool IsPlayerInMeleeWithEnemy(float playerX, float playerY, const EnemyState& enemy) {
-    if (IsGoblinBoss(enemy)) {
-        return IsInMeleeRangeWithEnemy(playerX, playerY, enemy);
-    }
-    return IsInMeleeRange(playerX, playerY, enemy.x, enemy.y);
+    return IsInMeleeRangeWithEnemy(playerX, playerY, enemy);
 }
 
 void PickRandomBossComboPattern(int pattern[3]) {
@@ -234,11 +231,7 @@ void InitializeGoblinMovement(EnemyMovementState& move, const GridMap& map,
 bool StartEnemyPath(EnemyState& enemy, EnemyMovementState& move, const GridMap& map, int goalCol,
                     int goalRow, uint32_t tick, const std::vector<PlayerState>& players,
                     const std::vector<EnemyState>& enemies) {
-    if (IsGoblinBoss(enemy)) {
-        if (!GoblinBossFitsAtCenter(goalCol, goalRow, map, players, enemies, enemy.id)) {
-            return false;
-        }
-    } else if (IsCellOccupied(goalCol, goalRow, players, enemies, -1, enemy.id)) {
+    if (IsCellOccupied(goalCol, goalRow, players, enemies, -1, enemy.id)) {
         return false;
     }
 
@@ -284,27 +277,13 @@ bool StepEnemyMovement(EnemyState& enemy, EnemyMovementState& move, const GridMa
         const auto& waypoint = move.movePath[move.pathIndex];
         const int waypointCol = waypoint.first;
         const int waypointRow = waypoint.second;
-        if (IsGoblinBoss(enemy)) {
-            if (!GoblinBossFitsAtCenter(waypointCol, waypointRow, map, players, enemies, enemy.id)) {
-                ClearEnemyMove(move);
-                return moved;
-            }
-        } else if (IsCellOccupied(waypointCol, waypointRow, players, enemies, -1, enemy.id)) {
+        if (IsCellOccupied(waypointCol, waypointRow, players, enemies, -1, enemy.id)) {
             ClearEnemyMove(move);
             return moved;
         }
 
-        float targetX = 0.0f;
-        float targetY = 0.0f;
-        if (IsGoblinBoss(enemy)) {
-            const auto [centerX, centerY] =
-                GoblinBossWorldCenterFromCenterCell(waypointCol, waypointRow);
-            targetX = centerX;
-            targetY = centerY;
-        } else {
-            targetX = CellCenterX(waypointCol);
-            targetY = CellCenterY(waypointRow);
-        }
+        const float targetX = CellCenterX(waypointCol);
+        const float targetY = CellCenterY(waypointRow);
         float dx = targetX - enemy.x;
         float dy = targetY - enemy.y;
         const float dist = std::sqrt(dx * dx + dy * dy);
@@ -649,16 +628,12 @@ bool StartGoblinChase(EnemyState& enemy, EnemyMovementState& move, PlayerState& 
     }
 
     std::optional<GridPoint> approach;
-    if (IsGoblinBoss(enemy)) {
-        approach = FindBestBossChaseCenter(map, enemy, player, players, enemies);
-    } else {
-        const int enemyCol = WorldToCellCol(enemy.x);
-        const int enemyRow = WorldToCellRow(enemy.y);
-        const int playerCol = WorldToCellCol(player.x);
-        const int playerRow = WorldToCellRow(player.y);
-        approach = FindBestAdjacentApproachTile(map, enemyCol, enemyRow, playerCol, playerRow,
-                                                &players, &enemies, -1, enemy.id);
-    }
+    const int enemyCol = WorldToCellCol(enemy.x);
+    const int enemyRow = WorldToCellRow(enemy.y);
+    const int playerCol = WorldToCellCol(player.x);
+    const int playerRow = WorldToCellRow(player.y);
+    approach = FindBestAdjacentApproachTile(map, enemyCol, enemyRow, playerCol, playerRow, &players,
+                                            &enemies, -1, enemy.id);
     if (!approach.has_value()) {
         ClearEnemyChase(move);
         return false;
@@ -725,11 +700,8 @@ bool TryPathToCombatTarget(PlayerState& player, ConnectedClient& client, const E
     const int enemyCol = WorldToCellCol(enemy.x);
     const int enemyRow = WorldToCellRow(enemy.y);
     const std::optional<GridPoint> approach =
-        IsGoblinBoss(enemy)
-            ? FindBestAdjacentApproachTileForEnemy(map, playerCol, playerRow, enemy, &players,
-                                                   &enemies, player.id, enemy.id)
-            : FindBestAdjacentApproachTile(map, playerCol, playerRow, enemyCol, enemyRow, &players,
-                                           &enemies, player.id, enemy.id);
+        FindBestAdjacentApproachTile(map, playerCol, playerRow, enemyCol, enemyRow, &players,
+                                     &enemies, player.id, enemy.id);
     if (!approach.has_value()) {
         return false;
     }
@@ -1511,11 +1483,8 @@ void HandlePlayerEngageRequest(PlayerState& player, ConnectedClient& client,
     const int enemyCol = WorldToCellCol(enemy->x);
     const int enemyRow = WorldToCellRow(enemy->y);
     const std::optional<GridPoint> approach =
-        IsGoblinBoss(*enemy)
-            ? FindBestAdjacentApproachTileForEnemy(map, playerCol, playerRow, *enemy, &players,
-                                                   &enemies, player.id, enemyId)
-            : FindBestAdjacentApproachTile(map, playerCol, playerRow, enemyCol, enemyRow, &players,
-                                           &enemies, player.id, enemyId);
+        FindBestAdjacentApproachTile(map, playerCol, playerRow, enemyCol, enemyRow, &players,
+                                     &enemies, player.id, enemyId);
     if (!approach.has_value()) {
         client.pendingAttackEnemyId = -1;
         player.targetId = -1;
@@ -1776,6 +1745,15 @@ void GameServer::HandleMessage(const IncomingMessage& incoming) {
             }
 
             HandleRejoinArena(incoming.clientId);
+            break;
+        }
+        case MessageType::RespawnInArenaRequest: {
+            auto it = clients_.find(incoming.clientId);
+            if (it == clients_.end() || !it->second.hasJoined) {
+                return;
+            }
+
+            HandleRespawnInArena(incoming.clientId);
             break;
         }
         case MessageType::CancelCombatRequest: {
@@ -2119,6 +2097,17 @@ bool GameServer::CanPlayerRejoinArena(const PlayerState& player) const {
     return tick_ >= opensAt;
 }
 
+bool GameServer::CanPlayerRespawnInArena(const PlayerState& player) const {
+    if (sessionPhase_ != SessionPhase::ArenaActive) {
+        return false;
+    }
+    if (player.sceneId != SceneId::Arena || player.state != EntityState::Dead) {
+        return false;
+    }
+
+    return tick_ >= player.stateStartTick + kArenaDeathRespawnDelayTicks;
+}
+
 void GameServer::ReturnAllArenaPlayersToHub() {
     const GridMap& hubMap = HubGridMap();
     const int returningCount = CountPlayersInScene(SceneId::Arena);
@@ -2164,6 +2153,25 @@ void GameServer::HandleRejoinArena(int clientId) {
     player->arenaRejoinAtTick = 0;
     allDeadReturnAtTick_ = 0;
     std::cout << "[game] player " << clientId << " rejoined arena\n";
+}
+
+void GameServer::HandleRespawnInArena(int clientId) {
+    if (sessionPhase_ != SessionPhase::ArenaActive) {
+        return;
+    }
+
+    PlayerState* player = FindPlayer(players_, clientId);
+    if (player == nullptr || !CanPlayerRespawnInArena(*player)) {
+        return;
+    }
+
+    const GridMap& arenaMap = ArenaGridMap();
+    const std::vector<std::pair<int, int>> spawnCells = AllocateSpawnCells(arenaMap, 1);
+    ConnectedClient* client = FindClient(clients_, player->id);
+    const auto [spawnCol, spawnRow] = spawnCells.front();
+    ResetPlayerForScene(*player, client, SceneId::Arena, spawnCol, spawnRow);
+    allDeadReturnAtTick_ = 0;
+    std::cout << "[game] player " << clientId << " respawned in arena\n";
 }
 
 void GameServer::StartArena() {

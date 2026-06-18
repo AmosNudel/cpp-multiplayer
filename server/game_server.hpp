@@ -107,8 +107,10 @@ private:
     void HandleSetArenaReset(int clientId, bool selected);
     void HandleReturnToHub(int clientId);
     void HandleRejoinArena(int clientId);
+    void HandleRespawnInArena(int clientId);
     void ReturnAllArenaPlayersToHub();
     bool CanPlayerRejoinArena(const PlayerState& player) const;
+    bool CanPlayerRespawnInArena(const PlayerState& player) const;
     void StartArena();
     void EndArena();
     void ResetArena();

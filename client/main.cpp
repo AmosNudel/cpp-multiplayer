@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <algorithm>
+#include <cmath>
 #include <optional>
 #include <string>
 #include <vector>
@@ -249,14 +250,24 @@ struct GoblinSprites {
             tint = Color{255, 200, 200, 255};
         }
 
-        if (!idle.loaded) {
-            DrawCircleV(center, net::kPlayerRadius, Color{120, 200, 80, 255});
-            return;
-        }
-
         const bool isBoss = net::IsGoblinBoss(enemy);
         const float spriteHeight =
             isBoss ? net::kGoblinBossSpriteHeight : net::kGoblinSpriteHeight;
+
+        if (isBoss && enemy.state != net::EntityState::Dead) {
+            const float pulse = 0.85f + 0.15f * std::sin(static_cast<float>(serverTick) * 0.15f);
+            const float auraRadius = spriteHeight * 0.28f * pulse;
+            DrawCircleV(center, auraRadius + 10.0f, Color{255, 30, 30, 25});
+            DrawCircleV(center, auraRadius + 5.0f, Color{255, 50, 50, 45});
+            DrawCircleLines(center.x, center.y, auraRadius, Color{255, 70, 70, 190});
+        }
+
+        if (!idle.loaded) {
+            DrawCircleV(center, net::kPlayerRadius,
+                        isBoss ? Color{200, 60, 60, 255} : Color{120, 200, 80, 255});
+            return;
+        }
+
         const int frame =
             net::GoblinAnimFrameIndex(enemy.anim, serverTick, enemy.animStartTick);
         if (const SpriteSheet* sheet = SheetForAnim(enemy.anim, isBoss)) {
@@ -618,8 +629,8 @@ static void StopSpectating() {
 }
 
 static Rectangle DeathPanelRect() {
-    const int panelW = 280;
-    const int panelH = 150;
+    const int panelW = 300;
+    const int panelH = 190;
     return {
         static_cast<float>((GameViewport::kVirtualWidth - panelW) / 2),
         static_cast<float>((GameViewport::kVirtualHeight - panelH) / 2),
@@ -628,14 +639,19 @@ static Rectangle DeathPanelRect() {
     };
 }
 
+static Rectangle RespawnInArenaButtonRect() {
+    const Rectangle panel = DeathPanelRect();
+    return {panel.x + 24.0f, panel.y + 72.0f, panel.width - 48.0f, 36.0f};
+}
+
 static Rectangle ReturnToHubButtonRect() {
     const Rectangle panel = DeathPanelRect();
-    return {panel.x + 24.0f, panel.y + 72.0f, 108.0f, 36.0f};
+    return {panel.x + 24.0f, panel.y + 118.0f, 120.0f, 36.0f};
 }
 
 static Rectangle SpectateButtonRect() {
     const Rectangle panel = DeathPanelRect();
-    return {panel.x + 148.0f, panel.y + 72.0f, 108.0f, 36.0f};
+    return {panel.x + 156.0f, panel.y + 118.0f, 120.0f, 36.0f};
 }
 
 static Rectangle SpectateReturnButtonRect() {
@@ -671,6 +687,25 @@ static bool ShouldShowDeathPanel() {
            !gSpectating;
 }
 
+static int ArenaDeathRespawnSecondsLeft() {
+    const net::PlayerState* local = FindLocalPlayer();
+    if (local == nullptr || local->state != net::EntityState::Dead) {
+        return 0;
+    }
+
+    const uint32_t opensAt = local->stateStartTick + net::kArenaDeathRespawnDelayTicks;
+    const uint32_t tick = gClient.GetServerTick();
+    if (opensAt <= tick) {
+        return 0;
+    }
+
+    return static_cast<int>((opensAt - tick + net::kTickRate - 1) / net::kTickRate);
+}
+
+static bool CanLocalRespawnInArena() {
+    return ShouldShowDeathPanel() && ArenaDeathRespawnSecondsLeft() == 0;
+}
+
 static void DrawDeathPanel() {
     if (!ShouldShowDeathPanel()) {
         return;
@@ -684,8 +719,14 @@ static void DrawDeathPanel() {
     DrawRectangleLinesEx(panel, 1.0f, Color{82, 88, 104, 255});
     DrawText("You died", static_cast<int>(panel.x + 24), static_cast<int>(panel.y + 20), 24,
              RAYWHITE);
-    DrawText("Return to hub or spectate teammates.", static_cast<int>(panel.x + 24),
+    DrawText("Respawn in the arena, return to hub, or spectate.", static_cast<int>(panel.x + 24),
              static_cast<int>(panel.y + 48), 16, LIGHTGRAY);
+
+    const int respawnSecondsLeft = ArenaDeathRespawnSecondsLeft();
+    const char* respawnLabel = respawnSecondsLeft > 0
+                                   ? TextFormat("Respawn in Arena (%ds)", respawnSecondsLeft)
+                                   : "Respawn in Arena";
+    DrawUiButton(respawnLabel, RespawnInArenaButtonRect(), respawnSecondsLeft == 0);
     DrawUiButton("Return to Hub", ReturnToHubButtonRect());
     DrawUiButton("Spectate", SpectateButtonRect(), GetSpectateTarget() != nullptr);
 }
@@ -853,7 +894,8 @@ static void DrawCombatTargetHighlights() {
         }
         const Vector2 pos = DisplayPositionForEnemy(enemy);
         const float highlightRadius =
-            net::IsGoblinBoss(enemy) ? net::kGridCellSize * 2.0f : net::kPlayerRadius + 10.0f;
+            net::IsGoblinBoss(enemy) ? net::kGoblinBossSpriteHeight * 0.35f
+                                     : net::kPlayerRadius + 10.0f;
         DrawCircleLines(pos.x, pos.y, highlightRadius, Color{255, 220, 80, 220});
         DrawCircleLines(pos.x, pos.y, highlightRadius + 2.0f, Color{255, 220, 80, 100});
     }
@@ -1327,6 +1369,11 @@ static void HandleUiClicks() {
     }
 
     if (ShouldShowDeathPanel()) {
+        if (WasUiButtonPressed(RespawnInArenaButtonRect(), CanLocalRespawnInArena())) {
+            StopSpectating();
+            gClient.SendRespawnInArena();
+            return;
+        }
         if (WasUiButtonPressed(ReturnToHubButtonRect())) {
             StopSpectating();
             gClient.SendReturnToHub();

@@ -178,6 +178,7 @@ const char* MessageTypeName(MessageType type) {
         case MessageType::SetArenaResetRequest: return "set_arena_reset_request";
         case MessageType::ReturnToHubRequest: return "return_to_hub_request";
         case MessageType::RejoinArenaRequest: return "rejoin_arena_request";
+        case MessageType::RespawnInArenaRequest: return "respawn_in_arena_request";
         case MessageType::WorldState: return "world_state";
         case MessageType::PlayerLeft: return "player_left";
         case MessageType::Ping: return "ping";
@@ -201,6 +202,7 @@ MessageType ParseMessageType(const std::string& value) {
     if (value == "set_arena_reset_request") return MessageType::SetArenaResetRequest;
     if (value == "return_to_hub_request") return MessageType::ReturnToHubRequest;
     if (value == "rejoin_arena_request") return MessageType::RejoinArenaRequest;
+    if (value == "respawn_in_arena_request") return MessageType::RespawnInArenaRequest;
     if (value == "world_state") return MessageType::WorldState;
     if (value == "player_left") return MessageType::PlayerLeft;
     if (value == "ping") return MessageType::Ping;
@@ -293,6 +295,12 @@ Message MakeReturnToHubRequest() {
 Message MakeRejoinArenaRequest() {
     Message message;
     message.type = MessageType::RejoinArenaRequest;
+    return message;
+}
+
+Message MakeRespawnInArenaRequest() {
+    Message message;
+    message.type = MessageType::RespawnInArenaRequest;
     return message;
 }
 
@@ -400,6 +408,8 @@ std::string SerializeMessage(const Message& message) {
             break;
         case MessageType::RejoinArenaRequest:
             break;
+        case MessageType::RespawnInArenaRequest:
+            break;
         case MessageType::WorldState:
             json["tick"] = message.worldState.tick;
             json["players"] = nlohmann::json::array();
@@ -488,6 +498,8 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
             case MessageType::ReturnToHubRequest:
                 break;
             case MessageType::RejoinArenaRequest:
+                break;
+            case MessageType::RespawnInArenaRequest:
                 break;
             case MessageType::WorldState:
                 message.worldState.tick = json.at("tick").get<uint32_t>();

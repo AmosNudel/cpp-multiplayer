@@ -24,9 +24,8 @@ inline constexpr int kGoblinDeathFrameCount = 4;
 inline constexpr int kGoblinDeathAnimTicksPerFrame = 3;
 inline constexpr int kGoblinCorpseLifetimeTicks = 60;
 inline constexpr float kGoblinSpriteHeight = 128.0f;
-inline constexpr int kGoblinBossTileCols = 4;
-inline constexpr int kGoblinBossTileRows = 4;
-inline constexpr float kGoblinBossSpriteHeight = kGoblinSpriteHeight * kGoblinBossTileRows;
+inline constexpr float kGoblinBossVisualScale = 2.0f;
+inline constexpr float kGoblinBossSpriteHeight = kGoblinSpriteHeight * kGoblinBossVisualScale;
 inline constexpr int kGoblinBossId = 100;
 inline constexpr int kGoblinBossVariantDamageNumerator = 5;
 inline constexpr int kGoblinBossVariantDamageDenominator = 4;
@@ -80,18 +79,6 @@ bool AllRegularGoblinsDefeated(const std::vector<EnemyState>& enemies);
 bool HasGoblinBoss(const std::vector<EnemyState>& enemies);
 std::pair<int, int> PickGoblinBossSpawnCell(const GridMap& map,
                                             const std::vector<EnemyState>& enemies);
-std::pair<int, int> GoblinBossTopLeftFromCenter(int centerCol, int centerRow);
-std::pair<float, float> GoblinBossWorldCenterFromCenterCell(int centerCol, int centerRow);
-bool GoblinBossFitsAtTopLeft(int topLeftCol, int topLeftRow, const GridMap& map,
-                             const std::vector<PlayerState>& players,
-                             const std::vector<EnemyState>& enemies, int ignoreEnemyId = -1);
-bool GoblinBossFitsAtCenter(int centerCol, int centerRow, const GridMap& map,
-                            const std::vector<PlayerState>& players,
-                            const std::vector<EnemyState>& enemies, int ignoreEnemyId = -1);
-std::optional<GridPoint> FindBestBossChaseCenter(const GridMap& map, const EnemyState& boss,
-                                                 const PlayerState& player,
-                                                 const std::vector<PlayerState>& players,
-                                                 const std::vector<EnemyState>& enemies);
 
 inline int GoblinAnimFrameCount(PlayerAnim anim) {
     switch (anim) {

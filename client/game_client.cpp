@@ -248,6 +248,19 @@ void GameClient::SendRejoinArena() {
     }
 }
 
+void GameClient::SendRespawnInArena() {
+    if (state_ != ClientConnectionState::Joined) {
+        return;
+    }
+
+    const Message message = MakeRespawnInArenaRequest();
+    if (useWebSocket_) {
+        wsClient_.Send(message);
+    } else {
+        tcpClient_.Send(message);
+    }
+}
+
 void GameClient::SendChat(const std::string& text) {
     if (state_ != ClientConnectionState::Joined || text.empty()) {
         return;

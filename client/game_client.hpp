@@ -37,6 +37,7 @@ public:
     void SendSetArenaReset(bool selected);
     void SendReturnToHub();
     void SendRejoinArena();
+    void SendRespawnInArena();
     void SendChat(const std::string& text);
 
     ClientConnectionState GetState() const { return state_; }

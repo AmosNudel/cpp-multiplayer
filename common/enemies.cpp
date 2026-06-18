@@ -303,124 +303,6 @@ std::vector<EnemyState> CreateDefaultEnemies() {
     return enemies;
 }
 
-std::pair<int, int> GoblinBossTopLeftFromCenter(int centerCol, int centerRow) {
-    return {centerCol - kGoblinBossTileCols / 2, centerRow - kGoblinBossTileRows / 2};
-}
-
-float GoblinBossCenterXFromTopLeft(int topLeftCol) {
-    return CellCenterX(topLeftCol) +
-           (static_cast<float>(kGoblinBossTileCols) - 1.0f) * kGridCellSize * 0.5f;
-}
-
-float GoblinBossCenterYFromTopLeft(int topLeftRow) {
-    return CellCenterY(topLeftRow) +
-           (static_cast<float>(kGoblinBossTileRows) - 1.0f) * kGridCellSize * 0.5f;
-}
-
-std::pair<float, float> GoblinBossWorldCenterFromCenterCell(int centerCol, int centerRow) {
-    const auto [topLeftCol, topLeftRow] = GoblinBossTopLeftFromCenter(centerCol, centerRow);
-    return {GoblinBossCenterXFromTopLeft(topLeftCol), GoblinBossCenterYFromTopLeft(topLeftRow)};
-}
-
-bool GoblinBossFitsAtTopLeft(int topLeftCol, int topLeftRow, const GridMap& map,
-                             const std::vector<PlayerState>& players,
-                             const std::vector<EnemyState>& enemies, int ignoreEnemyId) {
-    if (topLeftCol < 0 || topLeftRow < 0 ||
-        topLeftCol + kGoblinBossTileCols > kGridCols ||
-        topLeftRow + kGoblinBossTileRows > kGridRows) {
-        return false;
-    }
-
-    for (int row = topLeftRow; row < topLeftRow + kGoblinBossTileRows; ++row) {
-        for (int col = topLeftCol; col < topLeftCol + kGoblinBossTileCols; ++col) {
-            if (!map.IsWalkable(col, row)) {
-                return false;
-            }
-            for (const PlayerState& player : players) {
-                if (!IsAlive(player.state)) {
-                    continue;
-                }
-                if (WorldToCellCol(player.x) == col && WorldToCellRow(player.y) == row) {
-                    return false;
-                }
-            }
-            for (const EnemyState& enemy : enemies) {
-                if (enemy.id == ignoreEnemyId || !IsAlive(enemy.state)) {
-                    continue;
-                }
-                if (IsGoblinBoss(enemy)) {
-                    const auto [otherTopLeftCol, otherTopLeftRow] =
-                        GoblinBossTopLeftFromCenter(WorldToCellCol(enemy.x),
-                                                    WorldToCellRow(enemy.y));
-                    if (col >= otherTopLeftCol && col < otherTopLeftCol + kGoblinBossTileCols &&
-                        row >= otherTopLeftRow && row < otherTopLeftRow + kGoblinBossTileRows) {
-                        return false;
-                    }
-                } else if (WorldToCellCol(enemy.x) == col && WorldToCellRow(enemy.y) == row) {
-                    return false;
-                }
-            }
-        }
-    }
-    return true;
-}
-
-bool GoblinBossFitsAtCenter(int centerCol, int centerRow, const GridMap& map,
-                            const std::vector<PlayerState>& players,
-                            const std::vector<EnemyState>& enemies, int ignoreEnemyId) {
-    const auto [topLeftCol, topLeftRow] = GoblinBossTopLeftFromCenter(centerCol, centerRow);
-    return GoblinBossFitsAtTopLeft(topLeftCol, topLeftRow, map, players, enemies, ignoreEnemyId);
-}
-
-std::optional<GridPoint> FindBestBossChaseCenter(const GridMap& map, const EnemyState& boss,
-                                                 const PlayerState& player,
-                                                 const std::vector<PlayerState>& players,
-                                                 const std::vector<EnemyState>& enemies) {
-    const int startCol = WorldToCellCol(boss.x);
-    const int startRow = WorldToCellRow(boss.y);
-    const int playerCol = WorldToCellCol(player.x);
-    const int playerRow = WorldToCellRow(player.y);
-
-    static constexpr int kDirections[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-    std::optional<GridPoint> best;
-    int bestPathLength = std::numeric_limits<int>::max();
-
-    for (const auto& direction : kDirections) {
-        const int touchCol = playerCol + direction[0];
-        const int touchRow = playerRow + direction[1];
-        if (!IsValidCell(touchCol, touchRow)) {
-            continue;
-        }
-
-        for (int localCol = 0; localCol < kGoblinBossTileCols; ++localCol) {
-            for (int localRow = 0; localRow < kGoblinBossTileRows; ++localRow) {
-                const int topLeftCol = touchCol - localCol;
-                const int topLeftRow = touchRow - localRow;
-                if (!GoblinBossFitsAtTopLeft(topLeftCol, topLeftRow, map, players, enemies,
-                                            boss.id)) {
-                    continue;
-                }
-
-                const int centerCol = topLeftCol + kGoblinBossTileCols / 2;
-                const int centerRow = topLeftRow + kGoblinBossTileRows / 2;
-                const std::vector<GridPoint> path =
-                    FindPath(map, startCol, startRow, centerCol, centerRow);
-                if (path.empty()) {
-                    continue;
-                }
-
-                const int pathLength = static_cast<int>(path.size());
-                if (pathLength < bestPathLength) {
-                    bestPathLength = pathLength;
-                    best = GridPoint{centerCol, centerRow};
-                }
-            }
-        }
-    }
-
-    return best;
-}
-
 bool IsGoblinBoss(const EnemyState& enemy) {
     return enemy.kind == kGoblinBossEntityId;
 }
@@ -430,22 +312,9 @@ bool IsRegularGoblin(const EnemyState& enemy) {
 }
 
 std::vector<std::pair<int, int>> EnemyOccupiedCells(const EnemyState& enemy) {
-    std::vector<std::pair<int, int>> cells;
-    if (IsGoblinBoss(enemy)) {
-        const auto [topLeftCol, topLeftRow] =
-            GoblinBossTopLeftFromCenter(WorldToCellCol(enemy.x), WorldToCellRow(enemy.y));
-        for (int row = topLeftRow; row < topLeftRow + kGoblinBossTileRows; ++row) {
-            for (int col = topLeftCol; col < topLeftCol + kGoblinBossTileCols; ++col) {
-                cells.emplace_back(col, row);
-            }
-        }
-        return cells;
-    }
-
     const int anchorCol = WorldToCellCol(enemy.x);
     const int anchorRow = WorldToCellRow(enemy.y);
-    cells.emplace_back(anchorCol, anchorRow);
-    return cells;
+    return {{anchorCol, anchorRow}};
 }
 
 bool AllRegularGoblinsDefeated(const std::vector<EnemyState>& enemies) {
@@ -471,17 +340,20 @@ bool HasGoblinBoss(const std::vector<EnemyState>& enemies) {
     return false;
 }
 
-bool IsValidGoblinBossSpawnCell(int topLeftCol, int topLeftRow, const GridMap& map,
+bool IsValidGoblinBossSpawnCell(int col, int row, const GridMap& map,
                                 const std::vector<EnemyState>& enemies) {
-    return GoblinBossFitsAtTopLeft(topLeftCol, topLeftRow, map, {}, enemies, -1);
+    if (!map.IsWalkable(col, row)) {
+        return false;
+    }
+    return !IsCellOccupiedByEnemy(col, row, enemies, -1);
 }
 
 std::pair<int, int> PickGoblinBossSpawnCell(const GridMap& map,
                                             const std::vector<EnemyState>& enemies) {
     const auto [centerCol, centerRow] = ResolvePlayerSpawnCell(map);
     std::vector<std::pair<int, int>> candidates;
-    for (int row = 1; row <= kGridRows - 1 - kGoblinBossTileRows; ++row) {
-        for (int col = 1; col <= kGridCols - 1 - kGoblinBossTileCols; ++col) {
+    for (int row = 1; row < kGridRows - 1; ++row) {
+        for (int col = 1; col < kGridCols - 1; ++col) {
             if (IsValidGoblinBossSpawnCell(col, row, map, enemies)) {
                 candidates.emplace_back(col, row);
             }
@@ -502,12 +374,12 @@ std::pair<int, int> PickGoblinBossSpawnCell(const GridMap& map,
     return candidates.front();
 }
 
-EnemyState CreateGoblinBossAt(int id, int topLeftCol, int topLeftRow) {
+EnemyState CreateGoblinBossAt(int id, int col, int row) {
     EnemyState boss;
     boss.id = id;
     boss.kind = kGoblinBossEntityId;
-    boss.x = GoblinBossCenterXFromTopLeft(topLeftCol);
-    boss.y = GoblinBossCenterYFromTopLeft(topLeftRow);
+    boss.x = CellCenterX(col);
+    boss.y = CellCenterY(row);
     boss.state = EntityState::Idle;
     boss.anim = PlayerAnim::Idle;
     boss.hp = DefaultEntityRegistry().StatsFor(kGoblinBossEntityId).maxHp;
