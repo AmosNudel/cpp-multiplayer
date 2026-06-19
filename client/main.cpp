@@ -2303,7 +2303,6 @@ static void DrawGame() {
     gViewport.BeginFrame();
 
     DrawUiChrome();
-    DrawMuteButton();
 
     const Rectangle gridRect = gWorldView.GridVirtualRect();
     BeginScissorMode(static_cast<int>(gridRect.x), static_cast<int>(gridRect.y),
@@ -2385,6 +2384,8 @@ static void DrawGame() {
     DrawArenaWipeOverlay();
     DrawVictoryOverlay();
     DrawLevelUpOverlay();
+
+    DrawMuteButton();
 
     gViewport.EndFrame();
 }

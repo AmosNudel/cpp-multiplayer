@@ -12,55 +12,74 @@ constexpr float kLocalSfxVolume = 0.55f;
 constexpr float kSharedSfxVolume = 0.65f;
 constexpr double kStepIntervalSeconds = 0.38;
 
-const char* kBgMusicPath = "sfx/bg_music.mp3";
-const char* kStepPath = "sfx/03_Step_grass_03.wav";
-const char* kAttackPath = "sfx/56_Attack_03.wav";
-const char* kHitPath = "sfx/61_Hit_03.wav";
-const char* kThunderPath = "sfx/18_Thunder_02.wav";
-const char* kHealPath = "sfx/02_Heal_02.wav";
-const char* kChargePath = "sfx/45_Charge_05.wav";
+const char* kBgMusicFile = "bg_music.mp3";
+const char* kStepFile = "03_Step_grass_03.wav";
+const char* kAttackFile = "56_Attack_03.wav";
+const char* kHitFile = "61_Hit_03.wav";
+const char* kThunderFile = "18_Thunder_02.wav";
+const char* kHealFile = "02_Heal_02.wav";
+const char* kChargeFile = "45_Charge_05.wav";
 
 }  // namespace
 
-std::string AudioManager::ResolveSfxPath(const char* relativePath) {
-    const std::string relative = relativePath;
-    const std::string candidates[] = {relative, "../" + relative};
+std::string AudioManager::ResolveSfxPath(const char* fileName) {
+    const std::string name = fileName;
+    const std::string candidates[] = {
+        "assets/sfx/" + name,
+        "../assets/sfx/" + name,
+        "sfx/" + name,
+        "../sfx/" + name,
+    };
     for (const std::string& path : candidates) {
         if (FileExists(path.c_str())) {
             return path;
         }
     }
-    return relative;
+    return candidates[0];
 }
 
 void AudioManager::Init() {
     InitAudioDevice();
-
-    const std::string bgPath = ResolveSfxPath(kBgMusicPath);
-    if (FileExists(bgPath.c_str())) {
-        bgMusic_ = LoadMusicStream(bgPath.c_str());
-        bgMusicLoaded_ = bgMusic_.stream.buffer != nullptr;
-        if (bgMusicLoaded_) {
-            SetMusicVolume(bgMusic_, kBgMusicVolume);
-        }
+    if (!IsAudioDeviceReady()) {
+        TraceLog(LOG_WARNING, "AUDIO: Device failed to initialize");
+        return;
     }
 
-    auto loadSound = [this](const char* path, Sound& sound, bool& loaded) {
-        const std::string resolved = ResolveSfxPath(path);
+    const std::string bgPath = ResolveSfxPath(kBgMusicFile);
+    if (FileExists(bgPath.c_str())) {
+        bgMusic_ = LoadMusicStream(bgPath.c_str());
+        bgMusicLoaded_ = bgMusic_.frameCount > 0;
+        if (bgMusicLoaded_) {
+            SetMusicVolume(bgMusic_, kBgMusicVolume);
+            TraceLog(LOG_INFO, "AUDIO: Loaded music %s", bgPath.c_str());
+        } else {
+            TraceLog(LOG_WARNING, "AUDIO: Failed to load music %s", bgPath.c_str());
+        }
+    } else {
+        TraceLog(LOG_WARNING, "AUDIO: Missing music at %s", bgPath.c_str());
+    }
+
+    auto loadSound = [](const char* fileName, Sound& sound, bool& loaded) {
+        const std::string resolved = AudioManager::ResolveSfxPath(fileName);
         if (!FileExists(resolved.c_str())) {
-            TraceLog(LOG_WARNING, "Missing sfx: %s", resolved.c_str());
+            TraceLog(LOG_WARNING, "AUDIO: Missing sfx %s", resolved.c_str());
             return;
         }
         sound = LoadSound(resolved.c_str());
         loaded = sound.frameCount > 0;
+        if (loaded) {
+            TraceLog(LOG_INFO, "AUDIO: Loaded sfx %s", resolved.c_str());
+        } else {
+            TraceLog(LOG_WARNING, "AUDIO: Failed to load sfx %s", resolved.c_str());
+        }
     };
 
-    loadSound(kStepPath, step_, stepLoaded_);
-    loadSound(kAttackPath, attack_, attackLoaded_);
-    loadSound(kHitPath, hit_, hitLoaded_);
-    loadSound(kThunderPath, thunder_, thunderLoaded_);
-    loadSound(kHealPath, heal_, healLoaded_);
-    loadSound(kChargePath, charge_, chargeLoaded_);
+    loadSound(kStepFile, step_, stepLoaded_);
+    loadSound(kAttackFile, attack_, attackLoaded_);
+    loadSound(kHitFile, hit_, hitLoaded_);
+    loadSound(kThunderFile, thunder_, thunderLoaded_);
+    loadSound(kHealFile, heal_, healLoaded_);
+    loadSound(kChargeFile, charge_, chargeLoaded_);
 
     ApplyMuteVolumes();
     StartBackgroundMusic();

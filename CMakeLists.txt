@@ -94,10 +94,16 @@ if(BUILD_CLIENT)
     add_custom_command(TARGET game_client POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:game_client>/assets
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                ${CMAKE_SOURCE_DIR}/sfx $<TARGET_FILE_DIR:game_client>/sfx
-        COMMENT "Copying assets and sfx next to game_client"
+        COMMENT "Copying assets next to game_client"
     )
+
+    if(EXISTS "${CMAKE_SOURCE_DIR}/sfx")
+        add_custom_command(TARGET game_client POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    ${CMAKE_SOURCE_DIR}/sfx $<TARGET_FILE_DIR:game_client>/sfx
+            COMMENT "Copying sfx next to game_client"
+        )
+    endif()
 
     if(WIN32)
         target_link_libraries(game_client PRIVATE

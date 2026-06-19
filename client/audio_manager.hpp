@@ -33,7 +33,7 @@ private:
     void StartBackgroundMusic();
     void StopBackgroundMusic();
 
-    static std::string ResolveSfxPath(const char* relativePath);
+    static std::string ResolveSfxPath(const char* fileName);
 
     bool muted_ = false;
     bool joined_ = false;
