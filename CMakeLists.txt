@@ -86,6 +86,9 @@ if(BUILD_CLIENT)
         if(DEFINED WS_HOST_DEFAULT AND NOT WS_HOST_DEFAULT STREQUAL "")
             target_compile_definitions(game_client PRIVATE WS_HOST_DEFAULT="${WS_HOST_DEFAULT}")
         endif()
+        if(DEFINED WS_PORT_DEFAULT AND WS_PORT_DEFAULT GREATER 0)
+            target_compile_definitions(game_client PRIVATE WS_PORT_DEFAULT=${WS_PORT_DEFAULT})
+        endif()
         set(RAYLIB_WEB_LIB "${RAYLIB_PATH}/src/libraylib.web.a")
         if(NOT EXISTS "${RAYLIB_WEB_LIB}")
             message(FATAL_ERROR
@@ -95,7 +98,7 @@ if(BUILD_CLIENT)
             -sUSE_GLFW=3
             -sALLOW_MEMORY_GROWTH=1
             -sASYNCIFY
-            "-sEXPORTED_FUNCTIONS=['_NetWsOnOpen','_NetWsOnMessage','_NetWsOnError','_NetWsOnClose']"
+            "-sEXPORTED_FUNCTIONS=['_main','_NetWsOnOpen','_NetWsOnMessage','_NetWsOnError','_NetWsOnClose']"
             "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
             $<$<CONFIG:Debug>:-sASSERTIONS=1>
             "--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"

@@ -11,7 +11,8 @@ struct DesktopEndpoint {
 };
 
 // Builds ws:// or wss:// URL from WS_HOST, WS_PORT, WS_TLS env vars.
-// Web builds fall back to the browser hostname when WS_HOST is unset.
+// Production web builds use WS_HOST_DEFAULT / WS_PORT_DEFAULT (Railway).
+// Local-only web builds (no WS_HOST_DEFAULT) fall back to ws://localhost:7778.
 std::string BuildWebSocketUrl();
 
 // Desktop TCP endpoint from SERVER_HOST / SERVER_PORT env vars.

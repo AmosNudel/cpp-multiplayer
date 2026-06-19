@@ -43,14 +43,19 @@ std::string ResolveWebSocketHost() {
         return host;
     }
 
+#if defined(WS_HOST_DEFAULT)
+    if (std::string(WS_HOST_DEFAULT).size() > 0) {
+        return WS_HOST_DEFAULT;
+    }
+#endif
+
 #if defined(PLATFORM_WEB)
     std::string browserHost;
     const char* browserHostCStr = GetBrowserHostname();
     if (browserHostCStr && browserHostCStr[0] != '\0') {
         browserHost = browserHostCStr;
         free(const_cast<char*>(browserHostCStr));
-        // Local dev serves the page from localhost; always hit the local WS port
-        // even when the web build was configured with a production WS_HOST_DEFAULT.
+        // Only use browser localhost when no production host is baked into the build.
         if (IsLocalHost(browserHost)) {
             return browserHost;
         }
@@ -61,12 +66,6 @@ std::string ResolveWebSocketHost() {
     if (!host.empty()) {
         return host;
     }
-
-#if defined(WS_HOST_DEFAULT)
-    if (std::string(WS_HOST_DEFAULT).size() > 0) {
-        return WS_HOST_DEFAULT;
-    }
-#endif
 
 #if defined(PLATFORM_WEB)
     if (!browserHost.empty()) {
@@ -105,14 +104,14 @@ std::string BuildWebSocketUrl() {
     uint16_t port = 0;
     if (HasEnv("WS_PORT")) {
         port = EnvPort("WS_PORT", useTls ? 443 : kDefaultWsPort);
+#if defined(WS_PORT_DEFAULT)
+    } else if (WS_PORT_DEFAULT > 0) {
+        port = static_cast<uint16_t>(WS_PORT_DEFAULT);
+#endif
     } else if (!useTls) {
         port = kDefaultWsPort;
     } else {
         port = 443;
-    }
-
-    if (!HasEnv("WS_PORT") && useTls) {
-        return std::string(scheme) + "://" + host;
     }
 
     if (IsDefaultPort(useTls, port)) {

@@ -1,7 +1,8 @@
 # Builds the web (Emscripten) client with WebSocket networking.
 param(
     [string]$DeployPath = "",
-    [string]$WsHost = ""
+    [string]$WsHost = "",
+    [int]$WsPort = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,6 +22,12 @@ if (-not (Test-Path $make)) {
 if ($WsHost -eq "") {
     $config = & $loader -Required
     $WsHost = $config.WsHost
+    if ($WsPort -eq 0 -and $config.WsPort) {
+        $WsPort = [int]$config.WsPort
+    }
+}
+if ($WsPort -eq 0) {
+    $WsPort = 8080
 }
 
 function Find-EmsdkEnv {
@@ -149,6 +156,7 @@ $cmakeConfigureArgs = @(
 if ($WsHost -ne "") {
     $cmakeConfigureArgs += "-DWS_HOST_DEFAULT=$WsHost"
 }
+$cmakeConfigureArgs += "-DWS_PORT_DEFAULT=$WsPort"
 & emcmake @cmakeConfigureArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -215,7 +223,7 @@ Write-Host "Web build ready!"
 Write-Host "  $webDist"
 Write-Host "  index.html, game_client.js, game_client.wasm, game_client.data"
 Write-Host ""
-Write-Host "Production WebSocket URL (auto when hosted on HTTPS):"
-Write-Host "  wss://$WsHost"
+Write-Host "Production WebSocket URL (when built with production config):"
+Write-Host "  wss://${WsHost}:${WsPort}"
 Write-Host ""
 Write-Host "Override with WS_HOST / WS_TLS env vars if needed."

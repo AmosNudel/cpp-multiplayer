@@ -26,5 +26,6 @@ if (-not (Test-Path $configPath)) {
 return @{
     ServerHost = $ProductionServerHost
     ServerPort = $ProductionServerPort
-    WsHost       = $ProductionWsHost
+    WsHost     = $ProductionWsHost
+    WsPort     = if ($ProductionWsPort) { [int]$ProductionWsPort } else { 8080 }
 }
