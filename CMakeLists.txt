@@ -56,6 +56,7 @@ if(BUILD_CLIENT)
 
     add_executable(game_client
         client/main.cpp
+        client/audio_manager.cpp
         client/viewport.cpp
         client/world_view.cpp
         client/connection_config.cpp
@@ -93,7 +94,9 @@ if(BUILD_CLIENT)
     add_custom_command(TARGET game_client POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:game_client>/assets
-        COMMENT "Copying assets next to game_client"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_SOURCE_DIR}/sfx $<TARGET_FILE_DIR:game_client>/sfx
+        COMMENT "Copying assets and sfx next to game_client"
     )
 
     if(WIN32)

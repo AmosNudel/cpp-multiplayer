@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "client/audio_manager.hpp"
 #include "client/connection_config.hpp"
 #include "client/game_client.hpp"
 #include "client/viewport.hpp"
@@ -282,6 +283,7 @@ struct GoblinSprites {
 };
 
 static net::GameClient gClient;
+static AudioManager gAudio;
 static GameViewport gViewport;
 static WorldView gWorldView;
 static PlayerSprites gPlayerSprites;
@@ -331,6 +333,9 @@ static constexpr double kFloatingDamageDuration = 0.9;
 
 static void DrawUiButton(const char* label, Rectangle bounds, bool enabled = true);
 static bool WasUiButtonPressed(Rectangle bounds, bool enabled = true);
+static Rectangle MuteButtonRect();
+static void DrawMuteButton();
+static void HandleMuteButtonClick();
 static const net::PlayerState* FindLocalPlayer();
 static net::SceneId GetLocalScene();
 
@@ -382,6 +387,44 @@ static bool TryGetWorldCellFromVirtual(Vector2 virtualPos, int& col, int& row) {
     col = net::WorldToCellCol(world.x);
     row = net::WorldToCellRow(world.y);
     return net::IsValidCell(col, row);
+}
+
+static Rectangle MuteButtonRect() {
+    return {
+        static_cast<float>(GameViewport::kVirtualWidth - 44),
+        12.0f,
+        32.0f,
+        32.0f,
+    };
+}
+
+static void DrawMuteButton() {
+    const Rectangle bounds = MuteButtonRect();
+    const Vector2 mouse = GetVirtualMousePosition();
+    const bool hover = CheckCollisionPointRec(mouse, bounds);
+    DrawRectangleRec(bounds, hover ? Color{54, 58, 70, 255} : Color{38, 42, 52, 255});
+    DrawRectangleLinesEx(bounds, 1.0f, Color{82, 88, 104, 255});
+
+    const char* label = gAudio.IsMuted() ? "OFF" : "ON";
+    const int fontSize = 14;
+    const int textW = MeasureText(label, fontSize);
+    DrawText(label,
+             static_cast<int>(bounds.x + (bounds.width - textW) * 0.5f),
+             static_cast<int>(bounds.y + (bounds.height - fontSize) * 0.5f),
+             fontSize, gAudio.IsMuted() ? Color{180, 180, 180, 255} : RAYWHITE);
+}
+
+static void HandleMuteButtonClick() {
+    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        return;
+    }
+    const Vector2 screenPos = GetMousePosition();
+    if (!gViewport.ContainsScreenPoint(screenPos)) {
+        return;
+    }
+    if (WasUiButtonPressed(MuteButtonRect())) {
+        gAudio.ToggleMute();
+    }
 }
 
 static void DrawUiChrome() {
@@ -482,19 +525,25 @@ static bool IsSkillOnCooldown(int skillId) {
     return false;
 }
 
-static int SkillCooldownSecondsLeft(int skillId) {
+static float SkillCooldownProgress(int skillId, int cooldownSeconds) {
+    if (cooldownSeconds <= 0) {
+        return 1.0f;
+    }
     const net::PlayerState* local = FindLocalPlayer();
     if (local == nullptr) {
-        return 0;
+        return 1.0f;
     }
     const uint32_t tick = gClient.GetServerTick();
+    const uint32_t totalTicks = static_cast<uint32_t>(cooldownSeconds * net::kTickRate);
     for (const net::PlayerSkillCooldown& cooldown : local->skillCooldowns) {
         if (cooldown.skillId == skillId && cooldown.readyAtTick > tick) {
-            return static_cast<int>((cooldown.readyAtTick - tick + net::kTickRate - 1) /
-                                    net::kTickRate);
+            const uint32_t ticksRemaining = cooldown.readyAtTick - tick;
+            return std::clamp(1.0f - static_cast<float>(ticksRemaining) /
+                                      static_cast<float>(totalTicks),
+                              0.0f, 1.0f);
         }
     }
-    return 0;
+    return 1.0f;
 }
 
 static std::optional<int> FindEnemyAtCell(int col, int row);
@@ -1241,6 +1290,44 @@ static void DrawUiButton(const char* label, Rectangle bounds, bool enabled) {
              fontSize, enabled ? RAYWHITE : Color{120, 124, 132, 255});
 }
 
+static void DrawSkillButton(const char* label, Rectangle bounds, bool enabled, net::SkillId skillId,
+                            float cooldownProgress) {
+    const bool onCooldown = cooldownProgress < 1.0f;
+    const bool interactive = enabled && !onCooldown;
+
+    const Vector2 mouse = GetVirtualMousePosition();
+    const bool hover = interactive && CheckCollisionPointRec(mouse, bounds);
+    DrawRectangleRec(bounds,
+                     interactive ? (hover ? Color{54, 58, 70, 255} : Color{38, 42, 52, 255})
+                                 : Color{32, 34, 40, 255});
+
+    if (onCooldown) {
+        const Color tint = SkillTintFor(skillId);
+        constexpr float inset = 1.0f;
+        const float innerH = bounds.height - inset * 2.0f;
+        const float fillH = innerH * cooldownProgress;
+        DrawRectangleRec({bounds.x + inset, bounds.y + bounds.height - inset - fillH,
+                          bounds.width - inset * 2.0f, fillH},
+                         Color{tint.r, tint.g, tint.b, 140});
+
+        const float overlayH = innerH - fillH;
+        if (overlayH > 0.0f) {
+            DrawRectangleRec({bounds.x + inset, bounds.y + inset, bounds.width - inset * 2.0f,
+                              overlayH},
+                             Color{0, 0, 0, 90});
+        }
+    }
+
+    DrawRectangleLinesEx(bounds, 1.0f,
+                         interactive ? Color{82, 88, 104, 255} : Color{58, 62, 72, 255});
+    const int fontSize = 16;
+    const int textW = MeasureText(label, fontSize);
+    DrawText(label,
+             static_cast<int>(bounds.x + (bounds.width - textW) * 0.5f),
+             static_cast<int>(bounds.y + (bounds.height - fontSize) * 0.5f),
+             fontSize, interactive ? RAYWHITE : Color{120, 124, 132, 255});
+}
+
 static bool WasUiButtonPressed(Rectangle bounds, bool enabled) {
     return enabled && CheckCollisionPointRec(GetVirtualMousePosition(), bounds) &&
            IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
@@ -1361,18 +1448,13 @@ static void DrawActionsPanel() {
         for (int skillId : local->unlockedSkillIds) {
             const net::SkillId skill = net::SkillIdFromInt(skillId);
             const net::SkillDef& def = net::SkillDefFor(skill);
-            const bool onCooldown = IsSkillOnCooldown(skillId);
             const bool selected = gPendingSkillId == skillId;
             const Rectangle button = SkillButtonRect(buttonIndex);
-            DrawUiButton(def.displayName, button, !onCooldown);
+            const float cooldownProgress =
+                SkillCooldownProgress(skillId, def.cooldownSeconds);
+            DrawSkillButton(def.displayName, button, true, skill, cooldownProgress);
             if (selected) {
                 DrawRectangleLinesEx(button, 2.0f, SkillTintFor(skill));
-            }
-            if (onCooldown) {
-                const int secondsLeft = SkillCooldownSecondsLeft(skillId);
-                DrawText(TextFormat("%ds", secondsLeft),
-                         static_cast<int>(button.x + button.width - 28.0f),
-                         static_cast<int>(button.y + 10.0f), 14, GRAY);
             }
             ++buttonIndex;
         }
@@ -1460,6 +1542,7 @@ static Color ColorForPlayer(int playerId) {
 static void OnConnectionState(net::ClientConnectionState state, const std::string& detail) {
     switch (state) {
         case net::ClientConnectionState::Disconnected:
+            gAudio.OnDisconnected();
             gStatusText = detail.empty() ? "Disconnected" : detail;
             gEditingName = true;
             gChatExpanded = false;
@@ -1475,6 +1558,8 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
             gStatusText = detail;
             break;
         case net::ClientConnectionState::Joined:
+            gAudio.OnJoined();
+            gAudio.SeedSkillEffects(gClient.GetSession().skillEffects);
             UpdateStatusText();
             gEditingName = false;
             gChatExpanded = false;
@@ -1957,6 +2042,11 @@ static void HandleChatInput() {
 static void UpdateGame() {
     gViewport.UpdateLayout();
     gClient.Update();
+    gAudio.Update();
+    if (const net::PlayerState* local = FindLocalPlayer()) {
+        gAudio.UpdateLocalPlayer(*local, gClient.GetServerTick());
+    }
+    gAudio.UpdateSkillEffects(gClient.GetSession().skillEffects);
     SyncEntityVisuals();
     UpdateStatusText();
 
@@ -2005,6 +2095,8 @@ static void UpdateGame() {
         }
     }
 #endif
+
+    HandleMuteButtonClick();
 
     if (gEditingName) {
         int key = GetCharPressed();
@@ -2211,6 +2303,7 @@ static void DrawGame() {
     gViewport.BeginFrame();
 
     DrawUiChrome();
+    DrawMuteButton();
 
     const Rectangle gridRect = gWorldView.GridVirtualRect();
     BeginScissorMode(static_cast<int>(gridRect.x), static_cast<int>(gridRect.y),
@@ -2305,6 +2398,7 @@ static void MainLoop() {
 int main() {
     InitGameWindow("Multiplayer Game");
     net::InitializeEntityRegistry();
+    gAudio.Init();
     gViewport.Init();
     gPlayerSprites.Load();
     gGoblinSprites.Load();
@@ -2314,6 +2408,7 @@ int main() {
     gGoblinSprites.Unload();
     gPlayerSprites.Unload();
     gViewport.Shutdown();
+    gAudio.Shutdown();
     CloseWindow();
     return 0;
 }
@@ -2321,6 +2416,7 @@ int main() {
 int main() {
     InitGameWindow("Multiplayer Game");
     net::InitializeEntityRegistry();
+    gAudio.Init();
     gViewport.Init();
     gPlayerSprites.Load();
     gGoblinSprites.Load();
@@ -2336,6 +2432,7 @@ int main() {
     gGoblinSprites.Unload();
     gPlayerSprites.Unload();
     gViewport.Shutdown();
+    gAudio.Shutdown();
     CloseWindow();
     return 0;
 }
