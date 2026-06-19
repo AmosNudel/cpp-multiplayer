@@ -92,10 +92,9 @@ if(BUILD_CLIENT)
             -sALLOW_MEMORY_GROWTH=1
             -sASYNCIFY
             $<$<CONFIG:Debug>:-sASSERTIONS=1>
-            --shell-file=${RAYLIB_PATH}/src/shell.html
             "--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"
         )
-        set_target_properties(game_client PROPERTIES SUFFIX ".html")
+        set_target_properties(game_client PROPERTIES SUFFIX ".js")
     else()
         target_compile_definitions(game_client PRIVATE PLATFORM_DESKTOP)
         if(DEFINED SERVER_HOST_DEFAULT AND NOT SERVER_HOST_DEFAULT STREQUAL "")
@@ -106,18 +105,20 @@ if(BUILD_CLIENT)
         endif()
     endif()
 
-    add_custom_command(TARGET game_client POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-                ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:game_client>/assets
-        COMMENT "Copying assets next to game_client"
-    )
-
-    if(EXISTS "${CMAKE_SOURCE_DIR}/sfx")
+    if(NOT EMSCRIPTEN)
         add_custom_command(TARGET game_client POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory
-                    ${CMAKE_SOURCE_DIR}/sfx $<TARGET_FILE_DIR:game_client>/sfx
-            COMMENT "Copying sfx next to game_client"
+                    ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:game_client>/assets
+            COMMENT "Copying assets next to game_client"
         )
+
+        if(EXISTS "${CMAKE_SOURCE_DIR}/sfx")
+            add_custom_command(TARGET game_client POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                        ${CMAKE_SOURCE_DIR}/sfx $<TARGET_FILE_DIR:game_client>/sfx
+                COMMENT "Copying sfx next to game_client"
+            )
+        endif()
     endif()
 
     if(WIN32)

@@ -156,22 +156,50 @@ Write-Host "Compiling web build..."
 & emmake cmake --build $buildDir
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$webOut = Join-Path $buildDir "game_client.html"
+$webOut = Join-Path $buildDir "game_client.js"
 if (-not (Test-Path $webOut)) {
     Write-Host "Expected output not found: $webOut"
     exit 1
 }
 
+function Publish-WebBundle {
+    param([string]$Destination)
+
+    if (Test-Path $Destination) {
+        Remove-Item $Destination -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $Destination | Out-Null
+
+    $indexSrc = Join-Path $root "web\index.html"
+    if (-not (Test-Path $indexSrc)) {
+        Write-Host "Missing web shell: $indexSrc"
+        exit 1
+    }
+
+    Copy-Item $indexSrc (Join-Path $Destination "index.html")
+    Copy-Item (Join-Path $buildDir "game_client.js") $Destination
+    Copy-Item (Join-Path $buildDir "game_client.wasm") $Destination
+
+    $dataFile = Join-Path $buildDir "game_client.data"
+    if (Test-Path $dataFile) {
+        Copy-Item $dataFile $Destination
+    } else {
+        Write-Host "Warning: game_client.data not found; assets may be missing at runtime."
+    }
+}
+
+$webDist = Join-Path $root "web-dist"
+Publish-WebBundle -Destination $webDist
+
 if ($DeployPath -ne "") {
-    if (Test-Path $DeployPath) { Remove-Item $DeployPath -Recurse -Force }
-    New-Item -ItemType Directory -Path $DeployPath | Out-Null
-    Copy-Item (Join-Path $buildDir "game_client.*") $DeployPath
+    Publish-WebBundle -Destination $DeployPath
     Write-Host "Deployed to $DeployPath"
 }
 
 Write-Host ""
 Write-Host "Web build ready!"
-Write-Host "  $webOut"
+Write-Host "  $webDist"
+Write-Host "  index.html, game_client.js, game_client.wasm, game_client.data"
 Write-Host ""
 Write-Host "Production WebSocket URL (auto when hosted on HTTPS):"
 Write-Host "  wss://$WsHost"

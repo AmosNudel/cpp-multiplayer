@@ -3,6 +3,7 @@
 main
 build/
 build-web/
+web-dist/
 dist/
 installer/
 CMakeCache.txt
