@@ -187,8 +187,8 @@ struct ServerPorts {
     std::string wsSource = "default";
 };
 
-// When Railway TCP proxy is enabled, PORT is often set to the TCP port (7777)
-// instead of the public HTTP port. Use WS_PORT or HTTP_PORT for WebSocket.
+// When Railway TCP proxy is enabled, PORT is often auto-set to 7777 (same as TCP).
+// Public HTTPS/WSS is routed to PORT, not WS_PORT — you must set PORT=8080 in Railway.
 inline constexpr uint16_t kRailwayHttpPortFallback = 8080;
 
 inline ServerPorts ResolveServerPorts() {
@@ -203,7 +203,7 @@ inline ServerPorts ResolveServerPorts() {
         ports.tcpSource = "default";
     }
 
-    // Railway injects PORT for the public HTTP/WebSocket listener — prefer it over WS_PORT.
+    // PORT is what Railway routes public HTTP/WSS to — must differ from TCP (7777).
     if (TryEnvPort("PORT", ports.ws) && ports.ws != ports.tcp) {
         ports.wsSource = "PORT";
     } else if (TryEnvPort("WS_PORT", ports.ws)) {

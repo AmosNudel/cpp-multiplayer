@@ -277,8 +277,10 @@ In the Railway service settings:
 
 | Variable | Value | Purpose |
 |---|---|---|
-| `WS_PORT` | `${{PORT}}` | Railway assigns one public port; web clients connect here |
+| `PORT` | `8080` | **Required** when TCP proxy is on — Railway routes public HTTPS/WSS here |
 | `TCP_PORT` | `7777` | Desktop clients (enable TCP proxy in Railway networking) |
+
+> **Important:** With TCP proxy enabled, Railway auto-sets `PORT=7777`. That sends browser traffic to the raw TCP listener → 502 / connection reset. You must override with `PORT=8080`. Do not set `WS_PORT=8080` alone; it does not change Railway routing.
 
 > **Note:** Railway's default public URL works for WebSocket (`wss://your-app.up.railway.app`). For desktop TCP, enable Railway's TCP proxy feature and point clients at that host/port.
 

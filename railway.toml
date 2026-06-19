@@ -8,7 +8,11 @@ restartPolicyMaxRetries = 3
 
 # Railway exposes one public HTTP port via PORT (WebSocket).
 # Desktop TCP uses a separate TCP proxy -> TCP_PORT (7777).
-# Do NOT set PORT or WS_PORT to 7777.
+#
+# Required Railway variables (Service -> Variables):
+#   PORT=8080       <- overrides auto PORT=7777 when TCP proxy is enabled
+#   TCP_PORT=7777
+# Do NOT set WS_PORT unless PORT cannot be overridden; Railway routes wss:// to PORT.
 
 [[deploy.ports]]
 port = 7777

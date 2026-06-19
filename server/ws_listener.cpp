@@ -12,9 +12,15 @@ bool WsListener::Start(uint16_t port, MessageHandler onMessage, DisconnectHandle
     onMessage_ = std::move(onMessage);
     onDisconnect_ = std::move(onDisconnect);
 
+#if defined(_WIN32)
+    const char* listenHost = "0.0.0.0";
+#else
+    const char* listenHost = "::";
+#endif
+
     server_ = std::make_unique<ix::WebSocketServer>(
         static_cast<int>(port),
-        "0.0.0.0",
+        listenHost,
         ix::SocketServer::kDefaultTcpBacklog,
         ix::SocketServer::kDefaultMaxConnections,
         ix::WebSocketServer::kDefaultHandShakeTimeoutSecs,
