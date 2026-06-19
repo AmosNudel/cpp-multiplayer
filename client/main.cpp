@@ -10,6 +10,7 @@
 #include "client/audio_manager.hpp"
 #include "client/connection_config.hpp"
 #include "client/game_client.hpp"
+#include "client/pointer_input.hpp"
 #include "client/viewport.hpp"
 #include "client/world_view.hpp"
 #include "common/config.hpp"
@@ -286,6 +287,7 @@ static net::GameClient gClient;
 static AudioManager gAudio;
 static GameViewport gViewport;
 static WorldView gWorldView;
+static PointerInput gPointer;
 static PlayerSprites gPlayerSprites;
 static GoblinSprites gGoblinSprites;
 static SpriteSheet gThunderVfx;
@@ -345,6 +347,23 @@ static constexpr int kChatCollapsedH = 46;
 static constexpr int kChatExpandedH = 170;
 
 static Vector2 GetVirtualMousePosition() {
+    return gPointer.VirtualPosition();
+}
+
+static std::vector<Vector2> CollectVirtualTouchPoints() {
+    std::vector<Vector2> points;
+    const int touchCount = GetTouchPointCount();
+    points.reserve(static_cast<size_t>(touchCount));
+    for (int i = 0; i < touchCount; ++i) {
+        points.push_back(gViewport.ScreenToVirtual(GetTouchPosition(i)));
+    }
+    return points;
+}
+
+static Vector2 GetVirtualPointerPosition(const std::vector<Vector2>& touchPoints) {
+    if (!touchPoints.empty()) {
+        return touchPoints[0];
+    }
     return gViewport.ScreenToVirtual(GetMousePosition());
 }
 
@@ -415,7 +434,7 @@ static void DrawMuteButton() {
 }
 
 static void HandleMuteButtonClick() {
-    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    if (!gPointer.WasPressed()) {
         return;
     }
     const Vector2 screenPos = GetMousePosition();
@@ -1330,7 +1349,7 @@ static void DrawSkillButton(const char* label, Rectangle bounds, bool enabled, n
 
 static bool WasUiButtonPressed(Rectangle bounds, bool enabled) {
     return enabled && CheckCollisionPointRec(GetVirtualMousePosition(), bounds) &&
-           IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+           gPointer.WasPressed();
 }
 
 static void DrawSpectateHud() {
@@ -1374,7 +1393,7 @@ static void HandleSpectateInput() {
         UpdateSpectateCamera();
     }
 
-    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    if (!gPointer.WasPressed()) {
         return;
     }
 
@@ -1648,10 +1667,10 @@ static bool HasEnemyInSkillArea(int col, int row, int aoeRadius) {
 }
 
 static void HandleMapClick() {
-    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    if (!gPointer.WasPressed()) {
         return;
     }
-    if (gWorldView.IsPanning() || IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
+    if (gWorldView.IsPanning() || gWorldView.IsPinching() || IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
         return;
     }
 
@@ -1757,7 +1776,7 @@ static void HandleMapClick() {
 }
 
 static void HandleUiClicks() {
-    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    if (!gPointer.WasPressed()) {
         return;
     }
 
@@ -2054,9 +2073,9 @@ static void UpdateGame() {
         StopSpectating();
     }
     UpdateSpectateCamera();
-    HandleSpectateInput();
 
-    const Vector2 virtualMouse = GetVirtualMousePosition();
+    const std::vector<Vector2> virtualTouches = CollectVirtualTouchPoints();
+    const Vector2 virtualMouse = GetVirtualPointerPosition(virtualTouches);
     const bool blockGameplayInput =
         ShouldShowDeathPanel() || IsArenaWipePending() || IsArenaVictoryActive() ||
         (gSpectating && GetLocalScene() == net::SceneId::Arena && IsLocalPlayerDead());
@@ -2067,7 +2086,10 @@ static void UpdateGame() {
         && !gOptionsOpen
 #endif
         ;
-    gWorldView.UpdateInput(virtualMouse, allowCameraInput);
+    gPointer.Update(gViewport, gWorldView.BlockTouchTap());
+    gWorldView.UpdateInput(virtualMouse, allowCameraInput, virtualTouches);
+
+    HandleSpectateInput();
 
     if (IsKeyPressed(KEY_R) && allowCameraInput) {
         gWorldView.Reset();
@@ -2398,6 +2420,7 @@ static void MainLoop() {
 
 int main() {
     InitGameWindow("Multiplayer Game");
+    SetGesturesEnabled(GESTURE_PINCH_IN | GESTURE_PINCH_OUT | GESTURE_DRAG);
     net::InitializeEntityRegistry();
     gAudio.Init();
     gViewport.Init();
@@ -2416,6 +2439,7 @@ int main() {
 #else
 int main() {
     InitGameWindow("Multiplayer Game");
+    SetGesturesEnabled(GESTURE_PINCH_IN | GESTURE_PINCH_OUT | GESTURE_DRAG);
     net::InitializeEntityRegistry();
     gAudio.Init();
     gViewport.Init();

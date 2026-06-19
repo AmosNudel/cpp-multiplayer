@@ -59,6 +59,7 @@ if(BUILD_CLIENT)
         client/audio_manager.cpp
         client/viewport.cpp
         client/world_view.cpp
+        client/pointer_input.cpp
         client/connection_config.cpp
         client/game_client.cpp
         client/tcp_client.cpp
