@@ -83,6 +83,15 @@ Vector2 GameViewport::ScreenToVirtual(Vector2 screenPos) const {
     };
 }
 
+Rectangle GameViewport::VirtualToScreenRect(Rectangle virtualRect) const {
+    return {
+        dest_.x + virtualRect.x * scale_,
+        dest_.y + virtualRect.y * scale_,
+        virtualRect.width * scale_,
+        virtualRect.height * scale_,
+    };
+}
+
 bool GameViewport::ContainsScreenPoint(Vector2 screenPos) const {
     return CheckCollisionPointRec(screenPos, dest_);
 }

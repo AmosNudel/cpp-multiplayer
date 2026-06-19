@@ -12,6 +12,7 @@
 #include "client/game_client.hpp"
 #include "client/pointer_input.hpp"
 #include "client/viewport.hpp"
+#include "client/web_text_input.hpp"
 #include "client/world_view.hpp"
 #include "common/config.hpp"
 #include "common/enemies.hpp"
@@ -295,10 +296,14 @@ static std::string gStatusText = "Press ENTER to connect";
 static std::string gPlayerName = "Player";
 static std::string gChatInput;
 static bool gEditingName = true;
-static bool gChatExpanded = false;
-#if !defined(PLATFORM_WEB)
-static bool gOptionsOpen = false;
+static bool gNameInputFocused =
+#if defined(PLATFORM_WEB)
+    false;
+#else
+    true;
 #endif
+static bool gChatExpanded = false;
+static bool gOptionsOpen = false;
 static Color gLocalColor = RAYWHITE;
 static bool gSpectating = false;
 static int gSpectateTargetId = -1;
@@ -336,10 +341,20 @@ static constexpr double kFloatingDamageDuration = 0.9;
 static void DrawUiButton(const char* label, Rectangle bounds, bool enabled = true);
 static bool WasUiButtonPressed(Rectangle bounds, bool enabled = true);
 static Rectangle MuteButtonRect();
+static Rectangle OptionsButtonRect();
 static void DrawMuteButton();
+static void DrawOptionsButton();
 static void HandleMuteButtonClick();
+static void HandleOptionsButtonClick();
 static const net::PlayerState* FindLocalPlayer();
 static net::SceneId GetLocalScene();
+static void ResetNameInputFocus();
+static Rectangle PlayerNameFieldRect();
+static Rectangle PlayerNameConnectButtonRect();
+static void ShowPlayerNameWebInput();
+static void HandlePlayerNameInput();
+static void DrawPlayerNameEntry();
+static bool ConnectToServer();
 
 static constexpr int kChatPanelX = 20;
 static constexpr int kChatPanelW = 420;
@@ -365,6 +380,124 @@ static Vector2 GetVirtualPointerPosition(const std::vector<Vector2>& touchPoints
         return touchPoints[0];
     }
     return gViewport.ScreenToVirtual(GetMousePosition());
+}
+
+static void ResetNameInputFocus() {
+#if defined(PLATFORM_WEB)
+    WebTextInputHide();
+    gNameInputFocused = false;
+#else
+    gNameInputFocused = true;
+#endif
+}
+
+static Rectangle PlayerNameFieldRect() {
+    return {90.0f, 96.0f, 220.0f, 32.0f};
+}
+
+static Rectangle PlayerNameConnectButtonRect() {
+    return {320.0f, 94.0f, 100.0f, 36.0f};
+}
+
+static void ShowPlayerNameWebInput() {
+#if defined(PLATFORM_WEB)
+    const Rectangle screenRect = gViewport.VirtualToScreenRect(PlayerNameFieldRect());
+    WebTextInputShow(screenRect, gPlayerName.c_str(), 16);
+#endif
+}
+
+static void HandlePlayerNameInput() {
+    if (!gEditingName) {
+        return;
+    }
+
+#if defined(PLATFORM_WEB)
+    if (gNameInputFocused) {
+        ShowPlayerNameWebInput();
+        gPlayerName = WebTextInputGetValue();
+        if (WebTextInputConsumeSubmit() && !gPlayerName.empty()) {
+            ConnectToServer();
+            return;
+        }
+    }
+#endif
+
+    if (gPointer.WasPressed()) {
+        const Vector2 screenPos = GetMousePosition();
+        if (!gViewport.ContainsScreenPoint(screenPos)) {
+            return;
+        }
+
+        if (WasUiButtonPressed(PlayerNameConnectButtonRect(), !gPlayerName.empty())) {
+            ConnectToServer();
+            return;
+        }
+
+        if (WasUiButtonPressed(PlayerNameFieldRect())) {
+            gNameInputFocused = true;
+            ShowPlayerNameWebInput();
+            return;
+        }
+
+        if (gNameInputFocused &&
+            !CheckCollisionPointRec(GetVirtualMousePosition(), PlayerNameFieldRect()) &&
+            !CheckCollisionPointRec(GetVirtualMousePosition(), PlayerNameConnectButtonRect())) {
+            gNameInputFocused = false;
+#if defined(PLATFORM_WEB)
+            gPlayerName = WebTextInputGetValue();
+            WebTextInputHide();
+#endif
+        }
+    }
+
+#if !defined(PLATFORM_WEB)
+    if (!gNameInputFocused) {
+        return;
+    }
+
+    int key = GetCharPressed();
+    while (key > 0) {
+        if (key >= 32 && key <= 125 && gPlayerName.size() < 16) {
+            gPlayerName.push_back(static_cast<char>(key));
+        }
+        key = GetCharPressed();
+    }
+
+    if (IsKeyPressed(KEY_BACKSPACE) && !gPlayerName.empty()) {
+        gPlayerName.pop_back();
+    }
+
+    if (IsKeyPressed(KEY_ENTER) && !gPlayerName.empty()) {
+        ConnectToServer();
+    }
+#endif
+}
+
+static void DrawPlayerNameEntry() {
+    DrawText("Name:", 20, 100, 20, RAYWHITE);
+
+    const Rectangle field = PlayerNameFieldRect();
+    const bool focused = gNameInputFocused;
+    DrawRectangleRec(field, Color{30, 34, 42, 255});
+    DrawRectangleLinesEx(field, 1.0f,
+                         focused ? Color{120, 180, 255, 255} : Color{82, 88, 104, 255});
+
+#if !defined(PLATFORM_WEB)
+    DrawText(gPlayerName.c_str(), static_cast<int>(field.x + 8),
+             static_cast<int>(field.y + 6), 20, YELLOW);
+    if (focused) {
+        DrawText("_", static_cast<int>(field.x + 8 + MeasureText(gPlayerName.c_str(), 20)),
+                 static_cast<int>(field.y + 6), 20, YELLOW);
+    }
+#else
+    if (!focused) {
+        DrawText(gPlayerName.c_str(), static_cast<int>(field.x + 8),
+                 static_cast<int>(field.y + 6), 20, YELLOW);
+        DrawText("Tap name to edit", 20, 136, 16, GRAY);
+    }
+#endif
+
+    DrawUiButton("Enter", PlayerNameConnectButtonRect(), !gPlayerName.empty());
 }
 
 static Rectangle ChatPanelRect() {
@@ -408,6 +541,15 @@ static bool TryGetWorldCellFromVirtual(Vector2 virtualPos, int& col, int& row) {
     return net::IsValidCell(col, row);
 }
 
+static Rectangle OptionsButtonRect() {
+    return {
+        static_cast<float>(GameViewport::kVirtualWidth - 88),
+        12.0f,
+        36.0f,
+        32.0f,
+    };
+}
+
 static Rectangle MuteButtonRect() {
     return {
         static_cast<float>(GameViewport::kVirtualWidth - 44),
@@ -433,6 +575,26 @@ static void DrawMuteButton() {
              fontSize, gAudio.IsMuted() ? Color{180, 180, 180, 255} : RAYWHITE);
 }
 
+static void DrawOptionsButton() {
+    const Rectangle bounds = OptionsButtonRect();
+    const Vector2 mouse = GetVirtualMousePosition();
+    const bool hover = CheckCollisionPointRec(mouse, bounds);
+    const bool active = gOptionsOpen;
+    DrawRectangleRec(bounds,
+                     active ? Color{70, 76, 96, 255}
+                            : (hover ? Color{54, 58, 70, 255} : Color{38, 42, 52, 255}));
+    DrawRectangleLinesEx(bounds, 1.0f,
+                         active ? Color{120, 130, 160, 255} : Color{82, 88, 104, 255});
+
+    const char* label = "Opts";
+    const int fontSize = 14;
+    const int textW = MeasureText(label, fontSize);
+    DrawText(label,
+             static_cast<int>(bounds.x + (bounds.width - textW) * 0.5f),
+             static_cast<int>(bounds.y + (bounds.height - fontSize) * 0.5f),
+             fontSize, RAYWHITE);
+}
+
 static void HandleMuteButtonClick() {
     if (!gPointer.WasPressed()) {
         return;
@@ -443,6 +605,23 @@ static void HandleMuteButtonClick() {
     }
     if (WasUiButtonPressed(MuteButtonRect())) {
         gAudio.ToggleMute();
+    }
+}
+
+static void HandleOptionsButtonClick() {
+    if (!gPointer.WasPressed()) {
+        return;
+    }
+    const Vector2 screenPos = GetMousePosition();
+    if (!gViewport.ContainsScreenPoint(screenPos)) {
+        return;
+    }
+    if (WasUiButtonPressed(OptionsButtonRect())) {
+        if (gPendingSkillId >= 0) {
+            gPendingSkillId = -1;
+        } else {
+            gOptionsOpen = !gOptionsOpen;
+        }
     }
 }
 
@@ -1379,11 +1558,7 @@ static void DrawSpectateHud() {
 
 static void HandleSpectateInput() {
     if (!gSpectating || GetLocalScene() != net::SceneId::Arena || !IsLocalPlayerDead() ||
-        IsArenaWipePending() || gChatExpanded || gEditingName
-#if !defined(PLATFORM_WEB)
-        || gOptionsOpen
-#endif
-        ) {
+        IsArenaWipePending() || gChatExpanded || gEditingName || gOptionsOpen) {
         return;
     }
 
@@ -1480,7 +1655,7 @@ static void DrawActionsPanel() {
     }
 
     if (gPendingSkillId >= 0) {
-        DrawText("Click a grid tile to cast skill (ESC to cancel)",
+        DrawText("Click a grid tile to cast skill (click skill again to cancel)",
                  static_cast<int>(panel.x), static_cast<int>(panel.y + 72.0f), 14, SKYBLUE);
     }
 }
@@ -1569,9 +1744,8 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
             gSpectating = false;
             gSpectateTargetId = -1;
             ResetClientVisualState();
-#if !defined(PLATFORM_WEB)
             gOptionsOpen = false;
-#endif
+            ResetNameInputFocus();
             break;
         case net::ClientConnectionState::Connecting:
             gStatusText = detail;
@@ -1585,10 +1759,9 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
             gChatInput.clear();
             gSpectating = false;
             gSpectateTargetId = -1;
-#if !defined(PLATFORM_WEB)
             gOptionsOpen = false;
-#endif
             gLocalColor = ColorForPlayer(gClient.GetLocalPlayerId());
+            ResetNameInputFocus();
             break;
         case net::ClientConnectionState::Rejected:
             gStatusText = "Rejected: " + detail;
@@ -1596,14 +1769,20 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
             gChatExpanded = false;
             gChatInput.clear();
             ResetClientVisualState();
-#if !defined(PLATFORM_WEB)
             gOptionsOpen = false;
-#endif
+            ResetNameInputFocus();
             break;
     }
 }
 
 static bool ConnectToServer() {
+#if defined(PLATFORM_WEB)
+    if (gNameInputFocused) {
+        gPlayerName = WebTextInputGetValue();
+    }
+    WebTextInputHide();
+    gNameInputFocused = false;
+#endif
 #if defined(PLATFORM_WEB)
     const std::string url = net::BuildWebSocketUrl();
     return gClient.ConnectWeb(url, gPlayerName, OnConnectionState);
@@ -1680,11 +1859,9 @@ static void HandleMapClick() {
     }
 
     const Vector2 virtualPos = GetVirtualMousePosition();
-#if !defined(PLATFORM_WEB)
     if (gOptionsOpen) {
         return;
     }
-#endif
     if (IsMouseOverChatPanel(virtualPos) || IsMouseOverLevelUpOverlay(virtualPos)) {
         return;
     }
@@ -1785,11 +1962,9 @@ static void HandleUiClicks() {
         return;
     }
 
-#if !defined(PLATFORM_WEB)
     if (gOptionsOpen) {
         return;
     }
-#endif
 
     if (WasUiButtonPressed(ChatToggleButtonRect())) {
         if (gChatExpanded) {
@@ -1879,7 +2054,6 @@ static void HandleUiClicks() {
     }
 }
 
-#if !defined(PLATFORM_WEB)
 struct OptionsPanelLayout {
     int panelX = 0;
     int panelY = 0;
@@ -1936,7 +2110,6 @@ static void HandleOptionsInput() {
         CloseWindow();
     }
 }
-#endif
 
 static void DrawGridTiles() {
     const net::GridMap& map = GetActiveMap();
@@ -1985,11 +2158,9 @@ static void DrawGridHighlights() {
     if (gEditingName || gChatExpanded) {
         return;
     }
-#if !defined(PLATFORM_WEB)
     if (gOptionsOpen) {
         return;
     }
-#endif
 
     const Vector2 screenPos = GetMousePosition();
     if (!gViewport.ContainsScreenPoint(screenPos)) {
@@ -2081,11 +2252,7 @@ static void UpdateGame() {
         (gSpectating && GetLocalScene() == net::SceneId::Arena && IsLocalPlayerDead());
     const bool allowCameraInput =
         !gEditingName && !gChatExpanded && !IsMouseOverActionsPanel(virtualMouse) &&
-        !blockGameplayInput
-#if !defined(PLATFORM_WEB)
-        && !gOptionsOpen
-#endif
-        ;
+        !blockGameplayInput && !gOptionsOpen;
     gPointer.Update(gViewport, gWorldView.BlockTouchTap());
     gWorldView.UpdateInput(virtualMouse, allowCameraInput, virtualTouches);
 
@@ -2099,15 +2266,6 @@ static void UpdateGame() {
         ToggleFullscreen();
     }
 
-#if !defined(PLATFORM_WEB)
-    if (IsKeyPressed(KEY_ESCAPE)) {
-        if (gPendingSkillId >= 0) {
-            gPendingSkillId = -1;
-        } else {
-            gOptionsOpen = !gOptionsOpen;
-        }
-    }
-#else
     if (IsKeyPressed(KEY_ESCAPE)) {
         if (gPendingSkillId >= 0) {
             gPendingSkillId = -1;
@@ -2116,32 +2274,16 @@ static void UpdateGame() {
             gChatInput.clear();
         }
     }
-#endif
 
     HandleMuteButtonClick();
+    HandleOptionsButtonClick();
 
     if (gEditingName) {
-        int key = GetCharPressed();
-        while (key > 0) {
-            if (key >= 32 && key <= 125 && gPlayerName.size() < 16) {
-                gPlayerName.push_back(static_cast<char>(key));
-            }
-            key = GetCharPressed();
-        }
-
-        if (IsKeyPressed(KEY_BACKSPACE) && !gPlayerName.empty()) {
-            gPlayerName.pop_back();
-        }
-
-        if (IsKeyPressed(KEY_ENTER) && !gPlayerName.empty()) {
-            ConnectToServer();
-        }
-#if !defined(PLATFORM_WEB)
+        HandlePlayerNameInput();
         HandleOptionsInput();
         if (gOptionsOpen) {
             return;
         }
-#endif
         return;
     }
 
@@ -2149,12 +2291,10 @@ static void UpdateGame() {
         HandleChatInput();
     }
 
-#if !defined(PLATFORM_WEB)
     HandleOptionsInput();
     if (gOptionsOpen) {
         return;
     }
-#endif
 
     HandleUiClicks();
     if (!blockGameplayInput) {
@@ -2206,7 +2346,6 @@ static void DrawChatPanel() {
     }
 }
 
-#if !defined(PLATFORM_WEB)
 static void DrawOptionsPanel() {
     if (!gOptionsOpen) {
         return;
@@ -2229,7 +2368,6 @@ static void DrawOptionsPanel() {
     }
     DrawUiButton("Exit Game", layout.exitBtn);
 }
-#endif
 
 static void DrawEntityHpBar(Vector2 worldCenter, int hp, int maxHp, float spriteHeight) {
     if (maxHp <= 0) {
@@ -2386,20 +2524,12 @@ static void DrawGame() {
     DrawActionsPanel();
 
     if (gEditingName) {
-        DrawText("Name:", 20, 100, 20, RAYWHITE);
-        DrawText(gPlayerName.c_str(), 90, 100, 20, YELLOW);
-        DrawText("_", 90 + MeasureText(gPlayerName.c_str(), 20), 100, 20, YELLOW);
-        DrawText("ENTER = connect", 20, 130, 16, GRAY);
-#if !defined(PLATFORM_WEB)
-        DrawText("ESC = options", 20, 152, 16, GRAY);
-#endif
+        DrawPlayerNameEntry();
     } else {
         DrawChatPanel();
     }
 
-#if !defined(PLATFORM_WEB)
     DrawOptionsPanel();
-#endif
 
     DrawDeathPanel();
     DrawSpectateHud();
@@ -2408,6 +2538,7 @@ static void DrawGame() {
     DrawLevelUpOverlay();
 
     DrawMuteButton();
+    DrawOptionsButton();
 
     gViewport.EndFrame();
 }

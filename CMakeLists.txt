@@ -67,6 +67,7 @@ if(BUILD_CLIENT)
         client/pointer_input.cpp
         client/connection_config.cpp
         client/game_client.cpp
+        client/web_text_input.cpp
     )
     if(EMSCRIPTEN)
         target_sources(game_client PRIVATE client/ws_client_web.cpp)
@@ -98,7 +99,7 @@ if(BUILD_CLIENT)
             -sUSE_GLFW=3
             -sALLOW_MEMORY_GROWTH=1
             -sASYNCIFY
-            "-sEXPORTED_FUNCTIONS=['_main','_NetWsOnOpen','_NetWsOnMessage','_NetWsOnError','_NetWsOnClose']"
+            "-sEXPORTED_FUNCTIONS=['_main','_NetWsOnOpen','_NetWsOnMessage','_NetWsOnError','_NetWsOnClose','_NetNameInputSubmit']"
             "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
             $<$<CONFIG:Debug>:-sASSERTIONS=1>
             "--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"

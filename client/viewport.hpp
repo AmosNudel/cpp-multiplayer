@@ -15,6 +15,7 @@ struct GameViewport {
     void EndFrame();
 
     Vector2 ScreenToVirtual(Vector2 screenPos) const;
+    Rectangle VirtualToScreenRect(Rectangle virtualRect) const;
     bool ContainsScreenPoint(Vector2 screenPos) const;
 
 private:
