@@ -170,6 +170,11 @@ if (-not (Test-Path $webOut)) {
     exit 1
 }
 
+function Get-FileSha256Hex {
+    param([string]$Path)
+    return (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
 function Publish-WebBundle {
     param([string]$Destination)
 
@@ -179,35 +184,54 @@ function Publish-WebBundle {
         exit 1
     }
 
+    $jsSrc = Join-Path $buildDir "game_client.js"
+    $wasmSrc = Join-Path $buildDir "game_client.wasm"
+    $dataSrc = Join-Path $buildDir "game_client.data"
+    if (-not (Test-Path $jsSrc) -or -not (Test-Path $wasmSrc)) {
+        Write-Host "Missing web build artifacts in $buildDir"
+        exit 1
+    }
+
+    $jsHash = Get-FileSha256Hex $jsSrc
+    $wasmHash = Get-FileSha256Hex $wasmSrc
+    $buildId = $jsHash.Substring(0, 12)
+    $builtAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+    $indexHtml = Get-Content $indexSrc -Raw
+    $indexHtml = $indexHtml -replace 'src="game_client\.js(?:\?v=[^"]*)?"', "src=`"game_client.js?v=$buildId`""
+
     if (Test-Path $Destination) {
         try {
             Remove-Item $Destination -Recurse -Force -ErrorAction Stop
         } catch {
             Write-Host "Could not remove $Destination (in use). Updating files in place."
-            Copy-Item $indexSrc (Join-Path $Destination "index.html") -Force
-            Copy-Item (Join-Path $buildDir "game_client.js") $Destination -Force
-            Copy-Item (Join-Path $buildDir "game_client.wasm") $Destination -Force
-            $dataFile = Join-Path $buildDir "game_client.data"
-            if (Test-Path $dataFile) {
-                Copy-Item $dataFile $Destination -Force
-            } else {
-                Write-Host "Warning: game_client.data not found; assets may be missing at runtime."
-            }
-            return
         }
     }
-    New-Item -ItemType Directory -Path $Destination | Out-Null
+    if (-not (Test-Path $Destination)) {
+        New-Item -ItemType Directory -Path $Destination | Out-Null
+    }
 
-    Copy-Item $indexSrc (Join-Path $Destination "index.html")
-    Copy-Item (Join-Path $buildDir "game_client.js") $Destination
-    Copy-Item (Join-Path $buildDir "game_client.wasm") $Destination
+    Set-Content -Path (Join-Path $Destination "index.html") -Value $indexHtml -NoNewline
+    Copy-Item $jsSrc (Join-Path $Destination "game_client.js") -Force
+    Copy-Item $wasmSrc (Join-Path $Destination "game_client.wasm") -Force
 
-    $dataFile = Join-Path $buildDir "game_client.data"
-    if (Test-Path $dataFile) {
-        Copy-Item $dataFile $Destination
+    $manifest = @(
+        "built_at=$builtAt"
+        "build_id=$buildId"
+        "game_client.js=$jsHash"
+        "game_client.wasm=$wasmHash"
+    )
+    if (Test-Path $dataSrc) {
+        Copy-Item $dataSrc (Join-Path $Destination "game_client.data") -Force
+        $manifest += "game_client.data=$(Get-FileSha256Hex $dataSrc)"
     } else {
         Write-Host "Warning: game_client.data not found; assets may be missing at runtime."
     }
+    Set-Content -Path (Join-Path $Destination "BUILD_INFO.txt") -Value ($manifest -join "`n")
+
+    Write-Host "Bundle build_id=$buildId"
+    Write-Host "  js   $jsHash"
+    Write-Host "  wasm $wasmHash"
 }
 
 $webDist = Join-Path $root "web-dist"
@@ -221,7 +245,10 @@ if ($DeployPath -ne "") {
 Write-Host ""
 Write-Host "Web build ready!"
 Write-Host "  $webDist"
-Write-Host "  index.html, game_client.js, game_client.wasm, game_client.data"
+Write-Host "  index.html, game_client.js, game_client.wasm, game_client.data, BUILD_INFO.txt"
+Write-Host ""
+Write-Host "Deploy ALL files together into your Next.js public folder."
+Write-Host "Use an iframe pointing at index.html; do not import game_client.js in React."
 Write-Host ""
 Write-Host "Production WebSocket URL (when built with production config):"
 Write-Host "  wss://${WsHost}:${WsPort}"
