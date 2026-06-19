@@ -105,7 +105,8 @@ std::string BuildWebSocketUrl() {
     if (HasEnv("WS_PORT")) {
         port = EnvPort("WS_PORT", useTls ? 443 : kDefaultWsPort);
 #if defined(WS_PORT_DEFAULT)
-    } else if (WS_PORT_DEFAULT > 0) {
+    } else if (WS_PORT_DEFAULT > 0 && !useTls) {
+        // WS_PORT_DEFAULT is for local ws:// dev only. Public wss:// uses 443.
         port = static_cast<uint16_t>(WS_PORT_DEFAULT);
 #endif
     } else if (!useTls) {

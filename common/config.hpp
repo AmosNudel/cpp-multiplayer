@@ -203,14 +203,14 @@ inline ServerPorts ResolveServerPorts() {
         ports.tcpSource = "default";
     }
 
-    if (TryEnvPort("WS_PORT", ports.ws)) {
+    // Railway injects PORT for the public HTTP/WebSocket listener — prefer it over WS_PORT.
+    if (TryEnvPort("PORT", ports.ws) && ports.ws != ports.tcp) {
+        ports.wsSource = "PORT";
+    } else if (TryEnvPort("WS_PORT", ports.ws)) {
         ports.wsSource = "WS_PORT";
     } else if (TryEnvPort("HTTP_PORT", ports.ws)) {
         ports.wsSource = "HTTP_PORT";
-    } else if (TryEnvPort("PORT", ports.ws) && ports.ws != ports.tcp) {
-        ports.wsSource = "PORT";
     } else {
-        // Railway TCP proxy sets PORT=7777, same as TCP_PORT — use HTTP fallback.
         ports.ws = kRailwayHttpPortFallback;
         ports.wsSource = "fallback(8080)";
     }

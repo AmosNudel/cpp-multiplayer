@@ -26,11 +26,9 @@ WORKDIR /app
 COPY --from=builder /app/build/game_server /app/game_server
 
 # Railway TCP proxy uses TCP_PORT / RAILWAY_TCP_APPLICATION_PORT (7777).
-# WebSocket uses WS_PORT — set to your domain target port (e.g. 8080).
-# PORT is often 7777 when TCP proxy is on, so do not rely on PORT for WS.
+# WebSocket listens on Railway's PORT (injected at runtime) or WS_PORT fallback.
 ENV TCP_PORT=7777
-ENV WS_PORT=8080
 
-EXPOSE 7777
+EXPOSE 7777 8080
 
 CMD ["/app/game_server"]

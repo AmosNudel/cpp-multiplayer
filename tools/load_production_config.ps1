@@ -27,5 +27,5 @@ return @{
     ServerHost = $ProductionServerHost
     ServerPort = $ProductionServerPort
     WsHost     = $ProductionWsHost
-    WsPort     = if ($ProductionWsPort) { [int]$ProductionWsPort } else { 8080 }
+    WsPort     = if ($ProductionWsPort) { [int]$ProductionWsPort } else { 0 }
 }

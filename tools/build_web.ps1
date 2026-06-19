@@ -26,9 +26,6 @@ if ($WsHost -eq "") {
         $WsPort = [int]$config.WsPort
     }
 }
-if ($WsPort -eq 0) {
-    $WsPort = 8080
-}
 
 function Find-EmsdkEnv {
     $candidates = @(
@@ -156,7 +153,9 @@ $cmakeConfigureArgs = @(
 if ($WsHost -ne "") {
     $cmakeConfigureArgs += "-DWS_HOST_DEFAULT=$WsHost"
 }
-$cmakeConfigureArgs += "-DWS_PORT_DEFAULT=$WsPort"
+if ($WsPort -gt 0) {
+    $cmakeConfigureArgs += "-DWS_PORT_DEFAULT=$WsPort"
+}
 & emcmake @cmakeConfigureArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -251,6 +250,7 @@ Write-Host "Deploy ALL files together into your Next.js public folder."
 Write-Host "Use an iframe pointing at index.html; do not import game_client.js in React."
 Write-Host ""
 Write-Host "Production WebSocket URL (when built with production config):"
-Write-Host "  wss://${WsHost}:${WsPort}"
+Write-Host "  wss://${WsHost}"
+Write-Host "  (Railway routes public wss on 443 to the container WS listener.)"
 Write-Host ""
 Write-Host "Override with WS_HOST / WS_TLS env vars if needed."
