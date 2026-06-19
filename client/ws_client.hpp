@@ -37,6 +37,7 @@ private:
     ErrorHandler onError_;
     std::atomic<bool> connected_{false};
     std::atomic<bool> connectionLost_{false};
+    std::atomic<bool> pendingOpen_{false};
     std::mutex sendMutex_;
     std::mutex incomingMutex_;
     std::deque<Message> incoming_;

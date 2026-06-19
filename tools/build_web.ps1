@@ -120,7 +120,17 @@ if (-not (Test-Path $toolchain)) {
 
 if (Test-Path $buildDir) {
     Write-Host "Cleaning previous web build cache..."
-    Remove-Item $buildDir -Recurse -Force
+    try {
+        Remove-Item $buildDir -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Host ""
+        Write-Host "Could not remove $buildDir (folder is in use)."
+        Write-Host "Rebuilding in place instead. To force a clean rebuild:"
+        Write-Host "  - Stop any 'python -m http.server' running from build-web"
+        Write-Host "  - Close browser tabs using game_client.html"
+        Write-Host "  - Close terminals whose cwd is build-web"
+        Write-Host ""
+    }
 }
 
 Write-Host "Configuring web build..."

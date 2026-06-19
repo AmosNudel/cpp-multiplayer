@@ -91,6 +91,7 @@ if(BUILD_CLIENT)
             -sUSE_GLFW=3
             -sALLOW_MEMORY_GROWTH=1
             -sASYNCIFY
+            $<$<CONFIG:Debug>:-sASSERTIONS=1>
             --shell-file=${RAYLIB_PATH}/src/shell.html
             "--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"
         )

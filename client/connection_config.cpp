@@ -43,6 +43,20 @@ std::string ResolveWebSocketHost() {
         return host;
     }
 
+#if defined(PLATFORM_WEB)
+    std::string browserHost;
+    const char* browserHostCStr = GetBrowserHostname();
+    if (browserHostCStr && browserHostCStr[0] != '\0') {
+        browserHost = browserHostCStr;
+        free(const_cast<char*>(browserHostCStr));
+        // Local dev serves the page from localhost; always hit the local WS port
+        // even when the web build was configured with a production WS_HOST_DEFAULT.
+        if (IsLocalHost(browserHost)) {
+            return browserHost;
+        }
+    }
+#endif
+
     host = EnvString("SERVER_HOST", "");
     if (!host.empty()) {
         return host;
@@ -55,11 +69,8 @@ std::string ResolveWebSocketHost() {
 #endif
 
 #if defined(PLATFORM_WEB)
-    const char* browserHost = GetBrowserHostname();
-    if (browserHost && browserHost[0] != '\0') {
-        std::string resolved(browserHost);
-        free(const_cast<char*>(browserHost));
-        return resolved;
+    if (!browserHost.empty()) {
+        return browserHost;
     }
 #endif
 

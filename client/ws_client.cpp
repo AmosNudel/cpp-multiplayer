@@ -21,9 +21,7 @@ bool WsClient::Connect(const std::string& url, OpenHandler onOpen, ErrorHandler 
 
         if (message->type == ix::WebSocketMessageType::Open) {
             connected_ = true;
-            if (onOpen_) {
-                onOpen_();
-            }
+            pendingOpen_ = true;
             return;
         }
 
@@ -59,6 +57,7 @@ bool WsClient::Connect(const std::string& url, OpenHandler onOpen, ErrorHandler 
 void WsClient::Disconnect() {
     connected_ = false;
     connectionLost_ = false;
+    pendingOpen_ = false;
     webSocket_.stop();
     {
         std::lock_guard<std::mutex> lock(incomingMutex_);
@@ -82,6 +81,10 @@ bool WsClient::Send(const Message& message) {
 }
 
 void WsClient::Poll(std::function<void(const Message&)> onMessage) {
+    if (pendingOpen_.exchange(false) && onOpen_) {
+        onOpen_();
+    }
+
     if (!pendingError_.empty()) {
         std::string error;
         {
