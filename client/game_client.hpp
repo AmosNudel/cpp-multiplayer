@@ -5,7 +5,9 @@
 #include <string>
 #include <vector>
 
+#if !defined(PLATFORM_WEB)
 #include "client/tcp_client.hpp"
+#endif
 #include "client/ws_client.hpp"
 #include "common/protocol.hpp"
 
@@ -54,8 +56,11 @@ public:
 private:
     void HandleMessage(const Message& message);
     void SetState(ClientConnectionState state, const std::string& detail = "");
+    void SendActive(const Message& message);
 
+#if !defined(PLATFORM_WEB)
     TcpClient tcpClient_;
+#endif
     WsClient wsClient_;
     bool useWebSocket_ = false;
     ClientConnectionState state_ = ClientConnectionState::Disconnected;

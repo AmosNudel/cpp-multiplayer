@@ -25,6 +25,11 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(ixwebsocket)
 
+if(EMSCRIPTEN AND TARGET ixwebsocket)
+    # IXUserAgent.cpp omits PLATFORM_NAME on __unix__ targets that are not BSD/Linux.
+    target_compile_definitions(ixwebsocket PRIVATE PLATFORM_NAME=\"web\")
+endif()
+
 add_library(net_common STATIC
     common/protocol.cpp
     common/socket_utils.cpp
@@ -62,9 +67,11 @@ if(BUILD_CLIENT)
         client/pointer_input.cpp
         client/connection_config.cpp
         client/game_client.cpp
-        client/tcp_client.cpp
         client/ws_client.cpp
     )
+    if(NOT EMSCRIPTEN)
+        target_sources(game_client PRIVATE client/tcp_client.cpp)
+    endif()
     target_include_directories(game_client PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${RAYLIB_PATH}/src
@@ -75,13 +82,19 @@ if(BUILD_CLIENT)
         if(DEFINED WS_HOST_DEFAULT AND NOT WS_HOST_DEFAULT STREQUAL "")
             target_compile_definitions(game_client PRIVATE WS_HOST_DEFAULT="${WS_HOST_DEFAULT}")
         endif()
+        set(RAYLIB_WEB_LIB "${RAYLIB_PATH}/src/libraylib.web.a")
+        if(NOT EXISTS "${RAYLIB_WEB_LIB}")
+            message(FATAL_ERROR
+                "Missing ${RAYLIB_WEB_LIB}. Build raylib for web first (tools/build_web.ps1).")
+        endif()
         target_link_options(game_client PRIVATE
             -sUSE_GLFW=3
             -sALLOW_MEMORY_GROWTH=1
             -sASYNCIFY
             --shell-file=${RAYLIB_PATH}/src/shell.html
+            "--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"
         )
-        target_sources(game_client PRIVATE ${RAYLIB_PATH}/src/libraylib.a)
+        set_target_properties(game_client PROPERTIES SUFFIX ".html")
     else()
         target_compile_definitions(game_client PRIVATE PLATFORM_DESKTOP)
         if(DEFINED SERVER_HOST_DEFAULT AND NOT SERVER_HOST_DEFAULT STREQUAL "")
@@ -120,7 +133,7 @@ if(BUILD_CLIENT)
         target_link_libraries(game_client PRIVATE
             net_common
             ixwebsocket::ixwebsocket
-            ${RAYLIB_PATH}/src/libraylib.a
+            ${RAYLIB_WEB_LIB}
         )
     elseif(APPLE)
         find_library(COCOA_FRAMEWORK Cocoa)

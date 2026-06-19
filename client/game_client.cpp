@@ -19,6 +19,13 @@ uint32_t NowMs() {
 
 bool GameClient::ConnectDesktop(const std::string& host, uint16_t port,
                                 const std::string& playerName, StateHandler onState) {
+#if defined(PLATFORM_WEB)
+    (void)host;
+    (void)port;
+    (void)playerName;
+    (void)onState;
+    return false;
+#else
     Disconnect();
     useWebSocket_ = false;
     playerName_ = playerName;
@@ -32,6 +39,7 @@ bool GameClient::ConnectDesktop(const std::string& host, uint16_t port,
 
     tcpClient_.Send(MakeJoinRequest(playerName_));
     return true;
+#endif
 }
 
 bool GameClient::ConnectWeb(const std::string& wsUrl, const std::string& playerName,
@@ -59,7 +67,9 @@ bool GameClient::ConnectWeb(const std::string& wsUrl, const std::string& playerN
 }
 
 void GameClient::Disconnect() {
+#if !defined(PLATFORM_WEB)
     tcpClient_.Disconnect();
+#endif
     wsClient_.Disconnect();
     localPlayerId_ = 0;
     players_.clear();
@@ -83,11 +93,13 @@ void GameClient::Update() {
             pendingDetail_ = "Connection lost";
         }
     } else {
+#if !defined(PLATFORM_WEB)
         tcpClient_.Poll(onMessage);
         if (tcpClient_.ConsumeConnectionLost() && state_ == ClientConnectionState::Joined) {
             pendingDisconnect_ = true;
             pendingDetail_ = "Connection lost";
         }
+#endif
     }
 
     if (pendingDisconnect_) {
@@ -96,7 +108,9 @@ void GameClient::Update() {
         pendingDisconnect_ = false;
         pendingDetail_.clear();
 
+#if !defined(PLATFORM_WEB)
         tcpClient_.Disconnect();
+#endif
         wsClient_.Disconnect();
         localPlayerId_ = 0;
         players_.clear();
@@ -123,11 +137,7 @@ void GameClient::Update() {
     if (now - lastPingSentMs_ > 2000) {
         lastPingSentMs_ = now;
         const Message ping = MakePing(now);
-        if (useWebSocket_) {
-            wsClient_.Send(ping);
-        } else {
-            tcpClient_.Send(ping);
-        }
+        SendActive(ping);
     }
 }
 
@@ -136,12 +146,7 @@ void GameClient::SendMoveRequest(int col, int row) {
         return;
     }
 
-    const Message message = MakeMoveRequest(col, row);
-    if (useWebSocket_) {
-        wsClient_.Send(message);
-    } else {
-        tcpClient_.Send(message);
-    }
+    SendActive(MakeMoveRequest(col, row));
 }
 
 void GameClient::SendAttackRequest(int enemyId) {
@@ -149,12 +154,7 @@ void GameClient::SendAttackRequest(int enemyId) {
         return;
     }
 
-    const Message message = MakeAttackRequest(enemyId);
-    if (useWebSocket_) {
-        wsClient_.Send(message);
-    } else {
-        tcpClient_.Send(message);
-    }
+    SendActive(MakeAttackRequest(enemyId));
 }
 
 void GameClient::SendCancelCombat() {
@@ -162,12 +162,7 @@ void GameClient::SendCancelCombat() {
         return;
     }
 
-    const Message message = MakeCancelCombatRequest();
-    if (useWebSocket_) {
-        wsClient_.Send(message);
-    } else {
-        tcpClient_.Send(message);
-    }
+    SendActive(MakeCancelCombatRequest());
 }
 
 void GameClient::SendDisengage() {
@@ -175,12 +170,7 @@ void GameClient::SendDisengage() {
         return;
     }
 
-    const Message message = MakeDisengageRequest();
-    if (useWebSocket_) {
-        wsClient_.Send(message);
-    } else {
-        tcpClient_.Send(message);
-    }
+    SendActive(MakeDisengageRequest());
 }
 
 void GameClient::SendRespawnEnemy(int enemyId) {
@@ -188,12 +178,7 @@ void GameClient::SendRespawnEnemy(int enemyId) {
         return;
     }
 
-    const Message message = MakeRespawnEnemyRequest(enemyId);
-    if (useWebSocket_) {
-        wsClient_.Send(message);
-    } else {
-        tcpClient_.Send(message);
-    }
+    SendActive(MakeRespawnEnemyRequest(enemyId));
 }
 
 void GameClient::SendSetReady(bool ready) {
@@ -201,12 +186,7 @@ void GameClient::SendSetReady(bool ready) {
         return;
     }
 
-    const Message message = MakeSetReadyRequest(ready);
-    if (useWebSocket_) {
-        wsClient_.Send(message);
-    } else {
-        tcpClient_.Send(message);
-    }
+    SendActive(MakeSetReadyRequest(ready));
 }
 
 void GameClient::SendSetArenaReset(bool selected) {
@@ -214,12 +194,7 @@ void GameClient::SendSetArenaReset(bool selected) {
         return;
     }
 
-    const Message message = MakeSetArenaResetRequest(selected);
-    if (useWebSocket_) {
-        wsClient_.Send(message);
-    } else {
-        tcpClient_.Send(message);
-    }
+    SendActive(MakeSetArenaResetRequest(selected));
 }
 
 void GameClient::SendReturnToHub() {
@@ -227,12 +202,7 @@ void GameClient::SendReturnToHub() {
         return;
     }
 
-    const Message message = MakeReturnToHubRequest();
-    if (useWebSocket_) {
-        wsClient_.Send(message);
-    } else {
-        tcpClient_.Send(message);
-    }
+    SendActive(MakeReturnToHubRequest());
 }
 
 void GameClient::SendRejoinArena() {
@@ -240,12 +210,7 @@ void GameClient::SendRejoinArena() {
         return;
     }
 
-    const Message message = MakeRejoinArenaRequest();
-    if (useWebSocket_) {
-        wsClient_.Send(message);
-    } else {
-        tcpClient_.Send(message);
-    }
+    SendActive(MakeRejoinArenaRequest());
 }
 
 void GameClient::SendRespawnInArena() {
@@ -253,12 +218,7 @@ void GameClient::SendRespawnInArena() {
         return;
     }
 
-    const Message message = MakeRespawnInArenaRequest();
-    if (useWebSocket_) {
-        wsClient_.Send(message);
-    } else {
-        tcpClient_.Send(message);
-    }
+    SendActive(MakeRespawnInArenaRequest());
 }
 
 void GameClient::SendVoteSkillBranch(SkillBranch branch) {
@@ -266,12 +226,7 @@ void GameClient::SendVoteSkillBranch(SkillBranch branch) {
         return;
     }
 
-    const Message message = MakeVoteSkillBranchRequest(branch);
-    if (useWebSocket_) {
-        wsClient_.Send(message);
-    } else {
-        tcpClient_.Send(message);
-    }
+    SendActive(MakeVoteSkillBranchRequest(branch));
 }
 
 void GameClient::SendUseSkill(int skillId, int col, int row) {
@@ -279,12 +234,7 @@ void GameClient::SendUseSkill(int skillId, int col, int row) {
         return;
     }
 
-    const Message message = MakeUseSkillRequest(skillId, col, row);
-    if (useWebSocket_) {
-        wsClient_.Send(message);
-    } else {
-        tcpClient_.Send(message);
-    }
+    SendActive(MakeUseSkillRequest(skillId, col, row));
 }
 
 void GameClient::SendChat(const std::string& text) {
@@ -292,12 +242,17 @@ void GameClient::SendChat(const std::string& text) {
         return;
     }
 
-    const Message message = MakeChatSend(text);
+    SendActive(MakeChatSend(text));
+}
+
+void GameClient::SendActive(const Message& message) {
     if (useWebSocket_) {
         wsClient_.Send(message);
-    } else {
-        tcpClient_.Send(message);
+        return;
     }
+#if !defined(PLATFORM_WEB)
+    tcpClient_.Send(message);
+#endif
 }
 
 void GameClient::HandleMessage(const Message& message) {

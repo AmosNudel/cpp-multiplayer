@@ -7,8 +7,16 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $root "build-web"
-$exeName = "MultiplayerGame"
+$w64 = "C:/raylib/w64devkit/bin"
+$make = Join-Path $w64 "mingw32-make.exe"
+$raylibSrc = "C:/raylib/raylib/src"
 $loader = Join-Path $PSScriptRoot "load_production_config.ps1"
+
+if (-not (Test-Path $make)) {
+    Write-Host "MinGW make not found at $make"
+    Write-Host "Install raylib w64devkit or update the path in tools/build_web.ps1"
+    exit 1
+}
 
 if ($WsHost -eq "") {
     $config = & $loader -Required
@@ -24,6 +32,29 @@ function Find-EmsdkEnv {
     foreach ($path in $candidates) {
         if (Test-Path $path) { return $path }
     }
+    return $null
+}
+
+function Resolve-EmscriptenRoot {
+    param([string]$EmsdkEnvPath)
+
+    if ($env:EMSCRIPTEN -and (Test-Path $env:EMSCRIPTEN)) {
+        return $env:EMSCRIPTEN
+    }
+
+    $emsdkRoot = $env:EMSDK
+    if (-not $emsdkRoot -and $EmsdkEnvPath) {
+        $emsdkRoot = Split-Path -Parent $EmsdkEnvPath
+    }
+    if (-not $emsdkRoot) {
+        $emsdkRoot = "C:\raylib\emsdk"
+    }
+
+    $emscriptenRoot = Join-Path $emsdkRoot "upstream\emscripten"
+    if (Test-Path $emscriptenRoot) {
+        return $emscriptenRoot
+    }
+
     return $null
 }
 
@@ -46,23 +77,59 @@ if (-not $emsdkEnv) {
 }
 
 Write-Host "Activating Emscripten..."
+$env:EMSDK_QUIET = "1"
 . $emsdkEnv
+
+$env:PATH = "$w64;$env:PATH"
 
 if (-not (Get-Command emcc -ErrorAction SilentlyContinue)) {
     Write-Host "emcc not found after emsdk activation."
     exit 1
 }
 
-$toolchain = Join-Path $env:EMSCRIPTEN "cmake/Modules/Platform/Emscripten.cmake"
+# Build raylib for web (Emscripten) — desktop libraylib.a cannot link to WASM.
+$raylibWeb = Join-Path $raylibSrc "libraylib.web.a"
+if (-not (Test-Path $raylibWeb)) {
+    Write-Host "Building raylib for web (first time only)..."
+    Push-Location $raylibSrc
+    & $make PLATFORM=PLATFORM_WEB "MAKE=$make"
+    if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
+    Pop-Location
+    if (-not (Test-Path $raylibWeb)) {
+        Write-Host "Expected raylib web library not found: $raylibWeb"
+        exit 1
+    }
+}
+
+if (-not (Get-Command emcmake -ErrorAction SilentlyContinue)) {
+    Write-Host "emcmake not found after emsdk activation."
+    exit 1
+}
+
+$emscriptenRoot = Resolve-EmscriptenRoot -EmsdkEnvPath $emsdkEnv
+if (-not $emscriptenRoot) {
+    Write-Host "Could not locate Emscripten root. Set EMSCRIPTEN or install emsdk to C:\raylib\emsdk."
+    exit 1
+}
+
+$toolchain = Join-Path $emscriptenRoot "cmake\Modules\Platform\Emscripten.cmake"
 if (-not (Test-Path $toolchain)) {
     Write-Host "Emscripten CMake toolchain not found at: $toolchain"
     exit 1
 }
 
+if (Test-Path $buildDir) {
+    Write-Host "Cleaning previous web build cache..."
+    Remove-Item $buildDir -Recurse -Force
+}
+
 Write-Host "Configuring web build..."
 $cmakeConfigureArgs = @(
+    "cmake",
     "-S", $root,
     "-B", $buildDir,
+    "-G", "MinGW Makefiles",
+    "-DCMAKE_MAKE_PROGRAM=$make",
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
     "-DBUILD_SERVER=OFF",
     "-DBUILD_CLIENT=ON",
@@ -72,28 +139,11 @@ $cmakeConfigureArgs = @(
 if ($WsHost -ne "") {
     $cmakeConfigureArgs += "-DWS_HOST_DEFAULT=$WsHost"
 }
-& cmake @cmakeConfigureArgs
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-$flagsJoined = ($linkFlags -join " ")
-$cmakeLinkArgs = @(
-    "-S", $root,
-    "-B", $buildDir,
-    "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
-    "-DBUILD_SERVER=OFF",
-    "-DBUILD_CLIENT=ON",
-    "-DRAYLIB_PATH=C:/raylib/raylib",
-    "-DCMAKE_BUILD_TYPE=Release",
-    "-DCMAKE_EXE_LINKER_FLAGS=$flagsJoined"
-)
-if ($WsHost -ne "") {
-    $cmakeLinkArgs += "-DWS_HOST_DEFAULT=$WsHost"
-}
-& cmake @cmakeLinkArgs
+& emcmake @cmakeConfigureArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "Compiling web build..."
-& cmake --build $buildDir --config Release
+& emmake cmake --build $buildDir
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $webOut = Join-Path $buildDir "game_client.html"
