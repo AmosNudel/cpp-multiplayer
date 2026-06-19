@@ -21,24 +21,28 @@ bool WsListener::Start(uint16_t port, MessageHandler onMessage, DisconnectHandle
         ix::SocketServer::kDefaultAddressFamily);
 
     server_->setOnConnectionCallback(
-        [this](std::weak_ptr<ix::WebSocket> webSocket,
+        [this](std::weak_ptr<ix::WebSocket> webSocketWeak,
                std::shared_ptr<ix::ConnectionState> connectionState) {
             int clientId = 0;
             {
                 std::lock_guard<std::mutex> lock(clientsMutex_);
                 clientId = nextClientId_++;
-                clientsById_[clientId] = ClientEntry{webSocket, connectionState};
+                clientsById_[clientId] = ClientEntry{webSocketWeak, connectionState};
                 idByConnection_[connectionState] = clientId;
             }
             std::cout << "[ws] client " << clientId << " connected from "
                       << connectionState->getRemoteIp() << "\n";
-        });
 
-    server_->setOnClientMessageCallback(
-        [this](std::shared_ptr<ix::ConnectionState> connectionState,
-               ix::WebSocket& webSocket,
-               const ix::WebSocketMessagePtr& message) {
-            HandleMessage(connectionState, webSocket, message);
+            // IXWebSocket requires a per-connection message callback when using
+            // setOnConnectionCallback; setOnClientMessageCallback is ignored.
+            if (auto webSocket = webSocketWeak.lock()) {
+                webSocket->setOnMessageCallback(
+                    [this, webSocketWeak, connectionState](const ix::WebSocketMessagePtr& message) {
+                        if (auto ws = webSocketWeak.lock()) {
+                            HandleMessage(connectionState, *ws, message);
+                        }
+                    });
+            }
         });
 
     const auto result = server_->listen();

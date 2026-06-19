@@ -2,6 +2,8 @@
 *.dsym
 main
 build/
+build-test/
+build-*/
 build-web/
 web-dist/
 dist/
