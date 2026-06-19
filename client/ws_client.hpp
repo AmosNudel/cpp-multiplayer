@@ -6,7 +6,9 @@
 #include <mutex>
 #include <string>
 
+#if !defined(PLATFORM_WEB)
 #include <ixwebsocket/IXWebSocket.h>
+#endif
 
 #include "common/protocol.hpp"
 
@@ -28,11 +30,23 @@ public:
     void Poll(std::function<void(const Message&)> onMessage);
     bool ConsumeConnectionLost();
 
+#if defined(PLATFORM_WEB)
+    void HandleBrowserOpen();
+    void HandleBrowserMessage(const std::string& json);
+    void HandleBrowserError(const std::string& reason);
+    void HandleBrowserClose();
+    bool MatchesSocket(int socketId) const { return socketId_ == socketId; }
+#endif
+
 private:
     void EnqueueMessage(const Message& message);
     void EnqueueError(const std::string& reason);
 
+#if defined(PLATFORM_WEB)
+    int socketId_ = 0;
+#else
     ix::WebSocket webSocket_;
+#endif
     OpenHandler onOpen_;
     ErrorHandler onError_;
     std::atomic<bool> connected_{false};

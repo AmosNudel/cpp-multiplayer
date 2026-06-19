@@ -67,8 +67,12 @@ if(BUILD_CLIENT)
         client/pointer_input.cpp
         client/connection_config.cpp
         client/game_client.cpp
-        client/ws_client.cpp
     )
+    if(EMSCRIPTEN)
+        target_sources(game_client PRIVATE client/ws_client_web.cpp)
+    else()
+        target_sources(game_client PRIVATE client/ws_client.cpp)
+    endif()
     if(NOT EMSCRIPTEN)
         target_sources(game_client PRIVATE client/tcp_client.cpp)
     endif()
@@ -91,6 +95,8 @@ if(BUILD_CLIENT)
             -sUSE_GLFW=3
             -sALLOW_MEMORY_GROWTH=1
             -sASYNCIFY
+            "-sEXPORTED_FUNCTIONS=['_NetWsOnOpen','_NetWsOnMessage','_NetWsOnError','_NetWsOnClose']"
+            "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
             $<$<CONFIG:Debug>:-sASSERTIONS=1>
             "--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"
         )
@@ -134,7 +140,6 @@ if(BUILD_CLIENT)
     elseif(EMSCRIPTEN)
         target_link_libraries(game_client PRIVATE
             net_common
-            ixwebsocket::ixwebsocket
             ${RAYLIB_WEB_LIB}
         )
     elseif(APPLE)

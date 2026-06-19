@@ -165,16 +165,30 @@ if (-not (Test-Path $webOut)) {
 function Publish-WebBundle {
     param([string]$Destination)
 
-    if (Test-Path $Destination) {
-        Remove-Item $Destination -Recurse -Force
-    }
-    New-Item -ItemType Directory -Path $Destination | Out-Null
-
     $indexSrc = Join-Path $root "web\index.html"
     if (-not (Test-Path $indexSrc)) {
         Write-Host "Missing web shell: $indexSrc"
         exit 1
     }
+
+    if (Test-Path $Destination) {
+        try {
+            Remove-Item $Destination -Recurse -Force -ErrorAction Stop
+        } catch {
+            Write-Host "Could not remove $Destination (in use). Updating files in place."
+            Copy-Item $indexSrc (Join-Path $Destination "index.html") -Force
+            Copy-Item (Join-Path $buildDir "game_client.js") $Destination -Force
+            Copy-Item (Join-Path $buildDir "game_client.wasm") $Destination -Force
+            $dataFile = Join-Path $buildDir "game_client.data"
+            if (Test-Path $dataFile) {
+                Copy-Item $dataFile $Destination -Force
+            } else {
+                Write-Host "Warning: game_client.data not found; assets may be missing at runtime."
+            }
+            return
+        }
+    }
+    New-Item -ItemType Directory -Path $Destination | Out-Null
 
     Copy-Item $indexSrc (Join-Path $Destination "index.html")
     Copy-Item (Join-Path $buildDir "game_client.js") $Destination

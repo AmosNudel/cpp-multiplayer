@@ -1,5 +1,7 @@
 #include "ws_client.hpp"
 
+#if !defined(PLATFORM_WEB)
+
 namespace net {
 
 WsClient::~WsClient() {
@@ -124,3 +126,5 @@ void WsClient::EnqueueError(const std::string& reason) {
 }
 
 }  // namespace net
+
+#endif  // !PLATFORM_WEB
