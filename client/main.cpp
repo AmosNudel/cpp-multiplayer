@@ -374,6 +374,8 @@ struct EntityVisualState {
     int lastShield = -1;
     double snapTime = 0.0;
     double hitFlashUntil = 0.0;
+    double loopClockStartTime = 0.0;
+    bool loopClockInitialized = false;
 };
 
 struct FloatingDamage {
@@ -393,6 +395,10 @@ static int gLastUnlockedSkillCount = 0;
 
 static constexpr double kCombatHitFlashDuration = 0.12;
 static constexpr double kFloatingDamageDuration = 0.9;
+
+static bool IsLoopingAnim(net::PlayerAnim anim) {
+    return anim == net::PlayerAnim::Idle || anim == net::PlayerAnim::Run;
+}
 
 static void DrawUiButton(const char* label, Rectangle bounds, bool enabled = true);
 static bool WasUiButtonPressed(Rectangle bounds, bool enabled = true);
@@ -1332,6 +1338,19 @@ static uint32_t DisplayServerTick() {
     return tick + lead;
 }
 
+static uint32_t LoopingAnimTick(const EntityVisualState* visual, uint32_t fallbackServerTick,
+                                uint32_t fallbackAnimStartTick) {
+    if (visual == nullptr || !visual->loopClockInitialized) {
+        return fallbackServerTick >= fallbackAnimStartTick
+                   ? (fallbackServerTick - fallbackAnimStartTick)
+                   : 0;
+    }
+
+    const double elapsedSeconds = std::max(0.0, GetTime() - visual->loopClockStartTime);
+    return static_cast<uint32_t>(
+        elapsedSeconds / static_cast<double>(net::kTickDuration));
+}
+
 static Vector2 InterpolatedPosition(const EntityVisualState& visual) {
     const double elapsed = GetTime() - visual.snapTime;
     const float alpha =
@@ -1343,7 +1362,7 @@ static Vector2 InterpolatedPosition(const EntityVisualState& visual) {
 }
 
 static void SyncEntityVisual(const net::PlayerState& entity, EntityVisualState& visual,
-                             bool trackDamage) {
+                             bool trackDamage, uint32_t serverTick) {
     const double now = GetTime();
     if (visual.lastHp < 0) {
         visual.displayX = entity.x;
@@ -1355,6 +1374,14 @@ static void SyncEntityVisual(const net::PlayerState& entity, EntityVisualState& 
         visual.snapTime = now;
         visual.lastHp = entity.hp;
         visual.lastShield = entity.shield;
+        if (!visual.loopClockInitialized) {
+            const uint32_t elapsedTicks = serverTick >= entity.animStartTick
+                                              ? (serverTick - entity.animStartTick)
+                                              : 0;
+            visual.loopClockStartTime =
+                now - static_cast<double>(elapsedTicks) * static_cast<double>(net::kTickDuration);
+            visual.loopClockInitialized = true;
+        }
         return;
     }
 
@@ -1380,6 +1407,15 @@ static void SyncEntityVisual(const net::PlayerState& entity, EntityVisualState& 
         visual.lastHp = entity.hp;
         visual.lastShield = entity.shield;
     }
+
+    if (!visual.loopClockInitialized) {
+        const uint32_t elapsedTicks = serverTick >= entity.animStartTick
+                                          ? (serverTick - entity.animStartTick)
+                                          : 0;
+        visual.loopClockStartTime =
+            now - static_cast<double>(elapsedTicks) * static_cast<double>(net::kTickDuration);
+        visual.loopClockInitialized = true;
+    }
 }
 
 static void SyncEntityVisuals() {
@@ -1396,7 +1432,7 @@ static void SyncEntityVisuals() {
     std::unordered_map<int, EntityVisualState> nextPlayers;
     for (const net::PlayerState& player : gClient.GetPlayers()) {
         EntityVisualState visual = gPlayerVisuals[player.id];
-        SyncEntityVisual(player, visual, true);
+        SyncEntityVisual(player, visual, true, tick);
         nextPlayers[player.id] = visual;
     }
     gPlayerVisuals = std::move(nextPlayers);
@@ -1410,7 +1446,8 @@ static void SyncEntityVisuals() {
         proxy.hp = enemy.hp;
         proxy.shield = 0;
         proxy.state = enemy.state;
-        SyncEntityVisual(proxy, visual, true);
+        proxy.animStartTick = enemy.animStartTick;
+        SyncEntityVisual(proxy, visual, true, tick);
         nextEnemies[enemy.id] = visual;
     }
     gEnemyVisuals = std::move(nextEnemies);
@@ -2604,7 +2641,15 @@ static void DrawPlayerSprite(const net::PlayerState& player, Color color) {
     }
     const bool combatHitFlash =
         player.state == net::EntityState::Combat && IsCombatHitFlashing(visual);
-    gPlayerSprites.Draw(player, DisplayServerTick(), center, color, combatHitFlash);
+    net::PlayerState displayPlayer = player;
+    if (IsLoopingAnim(player.anim)) {
+        displayPlayer.animStartTick = 0;
+    }
+    const uint32_t displayTick = IsLoopingAnim(player.anim)
+                                     ? LoopingAnimTick(visual, DisplayServerTick(),
+                                                       player.animStartTick)
+                                     : DisplayServerTick();
+    gPlayerSprites.Draw(displayPlayer, displayTick, center, color, combatHitFlash);
     DrawPlayerBars(player, center);
 }
 
@@ -2632,7 +2677,15 @@ static void DrawEnemy(const net::EnemyState& enemy) {
     }
     const bool combatHitFlash =
         enemy.state == net::EntityState::Combat && IsCombatHitFlashing(visual);
-    gGoblinSprites.Draw(enemy, DisplayServerTick(), center, combatHitFlash);
+    net::EnemyState displayEnemy = enemy;
+    if (IsLoopingAnim(enemy.anim)) {
+        displayEnemy.animStartTick = 0;
+    }
+    const uint32_t displayTick = IsLoopingAnim(enemy.anim)
+                                     ? LoopingAnimTick(visual, DisplayServerTick(),
+                                                       enemy.animStartTick)
+                                     : DisplayServerTick();
+    gGoblinSprites.Draw(displayEnemy, displayTick, center, combatHitFlash);
     if (enemy.state != net::EntityState::Dead) {
         const net::EntityDef& def = net::DefaultEntityRegistry().MustFind(enemy.kind);
         DrawEntityHpBar(center, enemy.hp, def.stats.maxHp, def.spriteHeight);
