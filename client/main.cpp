@@ -156,6 +156,9 @@ struct SpriteSheet {
         }
 
         frame = frame % frameCount;
+        if (frame < 0) frame = 0;  // Ensure frame is never negative
+        
+        // Calculate source rectangle for this frame
         const float frameX = static_cast<float>(frame * frameWidth);
         const Rectangle source = facingRight
                                      ? Rectangle{frameX, 0.0f,
