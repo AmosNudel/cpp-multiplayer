@@ -35,6 +35,8 @@
 
 static const char* kIdleSpritePath =
     "assets/player_sprites/Sprites/with_outline/IDLE.png";
+static const char* kIdleFlippedSpritePath =
+    "assets/player_sprites/Sprites/without_outline/IDLE copy.png";
 static const char* kRunSpritePath =
     "assets/player_sprites/Sprites/with_outline/RUN.png";
 static const char* kAttack1SpritePath =
@@ -135,6 +137,7 @@ struct SpriteSheet {
 
 struct PlayerSprites {
     SpriteSheet idle;
+    SpriteSheet idleFlipped;
     SpriteSheet run;
     SpriteSheet attack1;
     SpriteSheet attack2;
@@ -145,6 +148,8 @@ struct PlayerSprites {
 
     void Load() {
         idle.Load(ResolveAssetPath(kIdleSpritePath).c_str(), net::kIdleFrameCount);
+        idleFlipped.Load(ResolveAssetPath(kIdleFlippedSpritePath).c_str(),
+                         net::kIdleFrameCount);
         run.Load(ResolveAssetPath(kRunSpritePath).c_str(), net::kRunFrameCount);
         attack1.Load(ResolveAssetPath(kAttack1SpritePath).c_str(), net::kAttack1FrameCount);
         attack2.Load(ResolveAssetPath(kAttack2SpritePath).c_str(), net::kAttack2FrameCount);
@@ -156,6 +161,7 @@ struct PlayerSprites {
 
     void Unload() {
         idle.Unload();
+        idleFlipped.Unload();
         run.Unload();
         attack1.Unload();
         attack2.Unload();
@@ -166,8 +172,8 @@ struct PlayerSprites {
     }
 
     bool AnyLoaded() const {
-        return idle.loaded || run.loaded || attack1.loaded || attack2.loaded || attack3.loaded ||
-               jump.loaded || hit.loaded || dead.loaded;
+         return idle.loaded || idleFlipped.loaded || run.loaded || attack1.loaded ||
+             attack2.loaded || attack3.loaded || jump.loaded || hit.loaded || dead.loaded;
     }
 
     const SpriteSheet* SheetForAnim(net::PlayerAnim anim) const {
@@ -199,6 +205,13 @@ struct PlayerSprites {
 
         const int frame =
             net::AnimFrameIndex(player.anim, serverTick, player.animStartTick);
+
+        if (player.anim == net::PlayerAnim::Idle && !player.facingRight &&
+            idleFlipped.loaded) {
+            // Use authored left-facing idle frames directly to avoid runtime flip artifacts.
+            idleFlipped.Draw(center, tint, frame, true);
+            return;
+        }
 
         if (const SpriteSheet* sheet = SheetForAnim(player.anim)) {
             sheet->Draw(center, tint, frame, player.facingRight);
