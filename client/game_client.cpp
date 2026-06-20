@@ -5,6 +5,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <unordered_map>
 
 #include "common/config.hpp"
 
@@ -14,6 +15,13 @@
 
 namespace net {
 namespace {
+
+struct AnimDebugState {
+    PlayerAnim anim = PlayerAnim::Idle;
+    uint32_t animStartTick = 0;
+    EntityState state = EntityState::Idle;
+    uint32_t stateStartTick = 0;
+};
 
 #if defined(PLATFORM_WEB)
 EM_JS(int, JsNetDebugEnabled, (), {
@@ -332,6 +340,8 @@ void GameClient::SendActive(const Message& message) {
 
 void GameClient::HandleMessage(const Message& message) {
     static uint32_t worldStateCount = 0;
+    static std::unordered_map<int, AnimDebugState> playerAnimDebug;
+    static std::unordered_map<int, AnimDebugState> enemyAnimDebug;
 
     switch (message.type) {
         case MessageType::JoinAccepted:
@@ -378,6 +388,75 @@ void GameClient::HandleMessage(const Message& message) {
                             message.worldState.players.size(),
                             message.worldState.enemies.size(), pingMs_);
             }
+
+            if (IsNetworkDebugEnabled()) {
+                for (const PlayerState& player : message.worldState.players) {
+                    AnimDebugState& prev = playerAnimDebug[player.id];
+                    if (prev.animStartTick > 0 &&
+                        (player.anim != prev.anim || player.animStartTick != prev.animStartTick)) {
+                        const uint32_t restartDelta =
+                            player.animStartTick >= prev.animStartTick
+                                ? (player.animStartTick - prev.animStartTick)
+                                : 0;
+                        DebugNetLog(
+                            "player anim id=%d %s(%u)->%s(%u) state=%s tick=%u deltaStart=%u",
+                            player.id,
+                            PlayerAnimName(prev.anim), prev.animStartTick,
+                            PlayerAnimName(player.anim), player.animStartTick,
+                            EntityStateName(player.state),
+                            message.worldState.tick,
+                            restartDelta);
+                    }
+                    if (prev.stateStartTick > 0 &&
+                        (player.state != prev.state || player.stateStartTick != prev.stateStartTick)) {
+                        DebugNetLog(
+                            "player state id=%d %s(%u)->%s(%u) anim=%s tick=%u",
+                            player.id,
+                            EntityStateName(prev.state), prev.stateStartTick,
+                            EntityStateName(player.state), player.stateStartTick,
+                            PlayerAnimName(player.anim),
+                            message.worldState.tick);
+                    }
+                    prev.anim = player.anim;
+                    prev.animStartTick = player.animStartTick;
+                    prev.state = player.state;
+                    prev.stateStartTick = player.stateStartTick;
+                }
+
+                for (const EnemyState& enemy : message.worldState.enemies) {
+                    AnimDebugState& prev = enemyAnimDebug[enemy.id];
+                    if (prev.animStartTick > 0 &&
+                        (enemy.anim != prev.anim || enemy.animStartTick != prev.animStartTick)) {
+                        const uint32_t restartDelta =
+                            enemy.animStartTick >= prev.animStartTick
+                                ? (enemy.animStartTick - prev.animStartTick)
+                                : 0;
+                        DebugNetLog(
+                            "enemy anim id=%d %s(%u)->%s(%u) state=%s tick=%u deltaStart=%u",
+                            enemy.id,
+                            PlayerAnimName(prev.anim), prev.animStartTick,
+                            PlayerAnimName(enemy.anim), enemy.animStartTick,
+                            EntityStateName(enemy.state),
+                            message.worldState.tick,
+                            restartDelta);
+                    }
+                    if (prev.stateStartTick > 0 &&
+                        (enemy.state != prev.state || enemy.stateStartTick != prev.stateStartTick)) {
+                        DebugNetLog(
+                            "enemy state id=%d %s(%u)->%s(%u) anim=%s tick=%u",
+                            enemy.id,
+                            EntityStateName(prev.state), prev.stateStartTick,
+                            EntityStateName(enemy.state), enemy.stateStartTick,
+                            PlayerAnimName(enemy.anim),
+                            message.worldState.tick);
+                    }
+                    prev.anim = enemy.anim;
+                    prev.animStartTick = enemy.animStartTick;
+                    prev.state = enemy.state;
+                    prev.stateStartTick = enemy.stateStartTick;
+                }
+            }
+
             serverTick_ = message.worldState.tick;
             players_ = message.worldState.players;
             enemies_ = message.worldState.enemies;
