@@ -8,16 +8,63 @@
 
 #include "common/config.hpp"
 
+#if defined(PLATFORM_WEB)
+#include <emscripten.h>
+#endif
+
 namespace net {
 namespace {
 
-bool IsNetworkDebugEnabled() {
-    const char* value = std::getenv("NET_DEBUG_WS");
-    if (value == nullptr || value[0] == '\0') {
-        return false;
+#if defined(PLATFORM_WEB)
+EM_JS(int, JsNetDebugEnabled, (), {
+    try {
+        if (typeof window === 'undefined') {
+            return 0;
+        }
+
+        const params = new URLSearchParams(window.location.search || '');
+        const query = (params.get('netdebug') || '').toLowerCase();
+        if (query === '1' || query === 'true' || query === 'yes') {
+            return 1;
+        }
+
+        const local = window.localStorage
+            ? (window.localStorage.getItem('NET_DEBUG_WS') || '').toLowerCase()
+            : '';
+        if (local === '1' || local === 'true' || local === 'yes') {
+            return 1;
+        }
+
+        if (window.NET_DEBUG_WS === true || window.NET_DEBUG_WS === 1) {
+            return 1;
+        }
+    } catch (e) {
     }
-    return value[0] == '1' || value[0] == 't' || value[0] == 'T' || value[0] == 'y' ||
-           value[0] == 'Y';
+    return 0;
+});
+#endif
+
+bool IsNetworkDebugEnabled() {
+    static int cached = -1;
+    if (cached >= 0) {
+        return cached == 1;
+    }
+
+    const char* value = std::getenv("NET_DEBUG_WS");
+    if (value != nullptr && value[0] != '\0') {
+        cached = (value[0] == '1' || value[0] == 't' || value[0] == 'T' || value[0] == 'y' ||
+                  value[0] == 'Y')
+                     ? 1
+                     : 0;
+        return cached == 1;
+    }
+
+#if defined(PLATFORM_WEB)
+    cached = JsNetDebugEnabled() != 0 ? 1 : 0;
+#else
+    cached = 0;
+#endif
+    return cached == 1;
 }
 
 void DebugNetLog(const char* format, ...) {
