@@ -35,8 +35,6 @@
 
 static const char* kIdleSpritePath =
     "assets/player_sprites/Sprites/with_outline/IDLE.png";
-static const char* kIdleFlippedSpritePath =
-    "assets/player_sprites/Sprites/without_outline/IDLE copy.png";
 static const char* kRunSpritePath =
     "assets/player_sprites/Sprites/with_outline/RUN.png";
 static const char* kAttack1SpritePath =
@@ -73,12 +71,24 @@ static std::string ResolveAssetPath(const char* relativePath) {
     return relative;
 }
 
+static std::string FlippedAssetPath(const std::string& path) {
+    const std::string::size_type slash = path.find_last_of("/\\");
+    const std::string::size_type dot = path.find_last_of('.');
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) {
+        return path + "_flipped";
+    }
+
+    return path.substr(0, dot) + "_flipped" + path.substr(dot);
+}
+
 struct SpriteSheet {
     Texture2D texture{};
+    Texture2D flippedTexture{};
     int frameWidth = 0;
     int frameHeight = 0;
     int frameCount = 0;
     bool loaded = false;
+    bool flippedLoaded = false;
 
     void Load(const char* path, int frames) {
         texture = LoadTexture(path);
@@ -92,12 +102,36 @@ struct SpriteSheet {
         frameWidth = texture.width / frameCount;
         frameHeight = texture.height;
         loaded = true;
+
+        const std::string flippedPath = FlippedAssetPath(path);
+        if (FileExists(flippedPath.c_str())) {
+            flippedTexture = LoadTexture(flippedPath.c_str());
+            if (flippedTexture.id != 0 && flippedTexture.width == texture.width &&
+                flippedTexture.height == texture.height) {
+                SetTextureFilter(flippedTexture, TEXTURE_FILTER_POINT);
+                SetTextureWrap(flippedTexture, TEXTURE_WRAP_CLAMP);
+                flippedLoaded = true;
+            } else {
+                if (flippedTexture.id != 0) {
+                    TraceLog(LOG_WARNING,
+                             "Ignoring flipped sheet with mismatched dimensions: %s",
+                             flippedPath.c_str());
+                    UnloadTexture(flippedTexture);
+                }
+                flippedTexture = {};
+                flippedLoaded = false;
+            }
+        }
     }
 
     void Unload() {
         if (loaded) {
             UnloadTexture(texture);
             loaded = false;
+        }
+        if (flippedLoaded) {
+            UnloadTexture(flippedTexture);
+            flippedLoaded = false;
         }
     }
 
@@ -110,16 +144,26 @@ struct SpriteSheet {
         frame = frame % frameCount;
         if (frame < 0) frame = 0;
 
-        const float frameX = static_cast<float>(frame * frameWidth);
+        int drawFrame = frame;
+        const bool useFlippedTexture = !facingRight && flippedLoaded;
+        if (useFlippedTexture) {
+            drawFrame = frameCount - 1 - frame;
+            if (drawFrame < 0) {
+                drawFrame = 0;
+            }
+        }
+
+        const float frameX = static_cast<float>(drawFrame * frameWidth);
         // Trim a tiny epsilon from frame edges to avoid sampling neighbors on WebGL.
         const float uvInset = 0.01f;
         const float sampleWidth = static_cast<float>(frameWidth) - uvInset * 2.0f;
         const float sourceY = uvInset;
         const float sourceH = static_cast<float>(frameHeight) - uvInset * 2.0f;
-        const Rectangle source = facingRight
-                         ? Rectangle{frameX + uvInset, sourceY, sampleWidth, sourceH}
-                         : Rectangle{frameX + uvInset + sampleWidth, sourceY,
-                             -sampleWidth, sourceH};
+        const Texture2D drawTexture = useFlippedTexture ? flippedTexture : texture;
+        const Rectangle source = (facingRight || useFlippedTexture)
+                                     ? Rectangle{frameX + uvInset, sourceY, sampleWidth, sourceH}
+                                     : Rectangle{frameX + uvInset + sampleWidth, sourceY,
+                                                 -sampleWidth, sourceH};
 
         const float scale = spriteHeight / static_cast<float>(frameHeight);
         const float drawWidth = static_cast<float>(frameWidth) * scale;
@@ -131,13 +175,12 @@ struct SpriteSheet {
             drawHeight,
         };
 
-        DrawTexturePro(texture, source, dest, Vector2{0.0f, 0.0f}, 0.0f, tint);
+        DrawTexturePro(drawTexture, source, dest, Vector2{0.0f, 0.0f}, 0.0f, tint);
     }
 };
 
 struct PlayerSprites {
     SpriteSheet idle;
-    SpriteSheet idleFlipped;
     SpriteSheet run;
     SpriteSheet attack1;
     SpriteSheet attack2;
@@ -148,8 +191,6 @@ struct PlayerSprites {
 
     void Load() {
         idle.Load(ResolveAssetPath(kIdleSpritePath).c_str(), net::kIdleFrameCount);
-        idleFlipped.Load(ResolveAssetPath(kIdleFlippedSpritePath).c_str(),
-                         net::kIdleFrameCount);
         run.Load(ResolveAssetPath(kRunSpritePath).c_str(), net::kRunFrameCount);
         attack1.Load(ResolveAssetPath(kAttack1SpritePath).c_str(), net::kAttack1FrameCount);
         attack2.Load(ResolveAssetPath(kAttack2SpritePath).c_str(), net::kAttack2FrameCount);
@@ -161,7 +202,6 @@ struct PlayerSprites {
 
     void Unload() {
         idle.Unload();
-        idleFlipped.Unload();
         run.Unload();
         attack1.Unload();
         attack2.Unload();
@@ -172,8 +212,8 @@ struct PlayerSprites {
     }
 
     bool AnyLoaded() const {
-         return idle.loaded || idleFlipped.loaded || run.loaded || attack1.loaded ||
-             attack2.loaded || attack3.loaded || jump.loaded || hit.loaded || dead.loaded;
+         return idle.loaded || run.loaded || attack1.loaded || attack2.loaded || attack3.loaded ||
+             jump.loaded || hit.loaded || dead.loaded;
     }
 
     const SpriteSheet* SheetForAnim(net::PlayerAnim anim) const {
@@ -205,13 +245,6 @@ struct PlayerSprites {
 
         const int frame =
             net::AnimFrameIndex(player.anim, serverTick, player.animStartTick);
-
-        if (player.anim == net::PlayerAnim::Idle && !player.facingRight &&
-            idleFlipped.loaded) {
-            // Use authored left-facing idle frames directly to avoid runtime flip artifacts.
-            idleFlipped.Draw(center, tint, frame, true);
-            return;
-        }
 
         if (const SpriteSheet* sheet = SheetForAnim(player.anim)) {
             sheet->Draw(center, tint, frame, player.facingRight);
