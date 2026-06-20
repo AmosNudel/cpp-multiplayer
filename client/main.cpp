@@ -60,58 +60,6 @@ static const char* kThunderVfxPath = "assets/vfx/Thunderstrike w blur.png";
 static const float kPlayerSpriteHeight = 96.0f;
 static constexpr float kGridScreenBottom = WorldView::kGridVirtualY + net::kWorldHeight;
 
-#if defined(PLATFORM_WEB)
-EM_JS(int, JsPerfDebugEnabled, (), {
-    try {
-        if (typeof window === 'undefined') {
-            return 0;
-        }
-
-        const params = new URLSearchParams(window.location.search || '');
-        const query = (params.get('netdebug') || '').toLowerCase();
-        if (query === '1' || query === 'true' || query === 'yes') {
-            return 1;
-        }
-
-        const local = window.localStorage
-            ? (window.localStorage.getItem('NET_DEBUG_WS') || '').toLowerCase()
-            : '';
-        if (local === '1' || local === 'true' || local === 'yes') {
-            return 1;
-        }
-
-        if (window.NET_DEBUG_WS === true || window.NET_DEBUG_WS === 1) {
-            return 1;
-        }
-    } catch (e) {
-    }
-    return 0;
-});
-#endif
-
-static bool IsPerfDebugEnabled() {
-    static int cached = -1;
-    if (cached >= 0) {
-        return cached == 1;
-    }
-
-    const char* value = std::getenv("NET_DEBUG_WS");
-    if (value != nullptr && value[0] != '\0') {
-        cached = (value[0] == '1' || value[0] == 't' || value[0] == 'T' || value[0] == 'y' ||
-                  value[0] == 'Y')
-                     ? 1
-                     : 0;
-        return cached == 1;
-    }
-
-#if defined(PLATFORM_WEB)
-    cached = JsPerfDebugEnabled() != 0 ? 1 : 0;
-#else
-    cached = 0;
-#endif
-    return cached == 1;
-}
-
 static std::string ResolveAssetPath(const char* relativePath) {
     const std::string relative = relativePath;
     const std::string candidates[] = {relative, "../" + relative};
@@ -156,9 +104,8 @@ struct SpriteSheet {
         }
 
         frame = frame % frameCount;
-        if (frame < 0) frame = 0;  // Ensure frame is never negative
-        
-        // Calculate source rectangle for this frame
+        if (frame < 0) frame = 0;
+
         const float frameX = static_cast<float>(frame * frameWidth);
         const Rectangle source = facingRight
                                      ? Rectangle{frameX, 0.0f,
@@ -167,6 +114,12 @@ struct SpriteSheet {
                                      : Rectangle{frameX + static_cast<float>(frameWidth), 0.0f,
                                                  -static_cast<float>(frameWidth),
                                                  static_cast<float>(frameHeight)};
+
+        if (!facingRight && (frame == 0 || frame == frameCount - 1)) {
+            std::printf("[flip-debug] flipped frame=%d/%d source_x=%.1f width=%.1f\n", frame,
+                        frameCount, source.x, source.width);
+        }
+
         const float scale = spriteHeight / static_cast<float>(frameHeight);
         const float drawWidth = static_cast<float>(frameWidth) * scale;
         const float drawHeight = static_cast<float>(frameHeight) * scale;
@@ -2792,18 +2745,6 @@ static void MainLoop() {
     const double frameStart = GetTime();
     UpdateGame();
     DrawGame();
-
-    if (IsPerfDebugEnabled()) {
-        const double frameMs = (GetTime() - frameStart) * 1000.0;
-        if (frameMs > 40.0) {
-            std::printf("[perf-debug] frame hitch frame_ms=%.1f state=%d players=%zu enemies=%zu ping=%d\n",
-                        frameMs,
-                        static_cast<int>(gClient.GetState()),
-                        gClient.GetPlayers().size(),
-                        gClient.GetEnemies().size(),
-                        gClient.GetPingMs());
-        }
-    }
 }
 
 int main() {
