@@ -531,9 +531,15 @@ static void DrawPlayerNameEntry() {
                  static_cast<int>(field.y + 6), 20, YELLOW);
     }
 #else
-    if (!focused) {
+    if (!focused || !gNameUsesWebInput) {
         DrawText(gPlayerName.c_str(), static_cast<int>(field.x + 8),
                  static_cast<int>(field.y + 6), 20, YELLOW);
+        if (focused && !gNameUsesWebInput) {
+            DrawText("_", static_cast<int>(field.x + 8 + MeasureText(gPlayerName.c_str(), 20)),
+                     static_cast<int>(field.y + 6), 20, YELLOW);
+        }
+    }
+    if (!focused) {
         DrawText("Tap name to edit", 20, 136, 16, GRAY);
     }
 #endif
@@ -2042,6 +2048,12 @@ static void HandleUiClicks() {
 #endif
         } else {
             gChatExpanded = true;
+#if defined(PLATFORM_WEB)
+            gChatUsesWebInput = gPointer.UsesTouch();
+            if (gChatUsesWebInput) {
+                ShowChatWebInput();
+            }
+#endif
         }
         return;
     }
@@ -2357,6 +2369,23 @@ static void UpdateGame() {
         !blockGameplayInput && !gOptionsOpen;
     gPointer.Update(gViewport, gWorldView.BlockTouchTap());
     gWorldView.UpdateInput(virtualMouse, allowCameraInput, virtualTouches);
+
+#if defined(PLATFORM_WEB)
+    if (!gEditingName && gChatExpanded && !gOptionsOpen && !virtualTouches.empty()) {
+        bool touchingChatInput = false;
+        const Rectangle chatInput = ChatInputFieldRect();
+        for (const Vector2 touch : virtualTouches) {
+            if (CheckCollisionPointRec(touch, chatInput)) {
+                touchingChatInput = true;
+                break;
+            }
+        }
+        if (touchingChatInput) {
+            gChatUsesWebInput = true;
+            ShowChatWebInput();
+        }
+    }
+#endif
 
     HandleSpectateInput();
 
