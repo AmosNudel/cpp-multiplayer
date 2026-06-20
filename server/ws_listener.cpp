@@ -136,6 +136,9 @@ void WsListener::HandleMessage(const std::shared_ptr<ix::ConnectionState>& conne
     std::optional<Message> parsed = DeserializeMessage(message->str);
     if (parsed) {
         onMessage_(clientId, *parsed);
+    } else {
+        std::cerr << "[ws] client " << clientId
+                  << " sent unparsable payload (len=" << message->str.size() << ")\n";
     }
 }
 

@@ -2,6 +2,8 @@
 
 #if !defined(PLATFORM_WEB)
 
+#include <cstdio>
+
 namespace net {
 
 WsClient::~WsClient() {
@@ -49,6 +51,10 @@ bool WsClient::Connect(const std::string& url, OpenHandler onOpen, ErrorHandler 
         std::optional<Message> parsed = DeserializeMessage(message->str);
         if (parsed) {
             EnqueueMessage(*parsed);
+        } else {
+            std::fprintf(stderr,
+                         "[ws-client] dropped unparsable websocket payload len=%zu\n",
+                         message->str.size());
         }
     });
 

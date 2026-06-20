@@ -4,6 +4,7 @@
 
 #include <emscripten.h>
 
+#include <cstdio>
 #include <optional>
 
 namespace net {
@@ -212,6 +213,10 @@ void WsClient::HandleBrowserMessage(const std::string& json) {
     std::optional<Message> parsed = DeserializeMessage(json);
     if (parsed) {
         EnqueueMessage(*parsed);
+    } else {
+        std::fprintf(stderr,
+                     "[ws-web] dropped unparsable websocket payload len=%zu\n",
+                     json.size());
     }
 }
 

@@ -2,11 +2,36 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
 
 #include "common/config.hpp"
 
 namespace net {
 namespace {
+
+bool IsNetworkDebugEnabled() {
+    const char* value = std::getenv("NET_DEBUG_WS");
+    if (value == nullptr || value[0] == '\0') {
+        return false;
+    }
+    return value[0] == '1' || value[0] == 't' || value[0] == 'T' || value[0] == 'y' ||
+           value[0] == 'Y';
+}
+
+void DebugNetLog(const char* format, ...) {
+    if (!IsNetworkDebugEnabled()) {
+        return;
+    }
+
+    std::va_list args;
+    va_start(args, format);
+    std::fputs("[net-debug] ", stderr);
+    std::vfprintf(stderr, format, args);
+    std::fputc('\n', stderr);
+    va_end(args);
+}
 
 uint32_t NowMs() {
     using Clock = std::chrono::steady_clock;
@@ -49,6 +74,7 @@ bool GameClient::ConnectWeb(const std::string& wsUrl, const std::string& playerN
     playerName_ = playerName;
     onState_ = std::move(onState);
     SetState(ClientConnectionState::Connecting, "Connecting via WebSocket to " + wsUrl + "...");
+    DebugNetLog("connect ws url=%s player=%s", wsUrl.c_str(), playerName.c_str());
 
     auto onOpen = [this]() {
         wsClient_.Send(MakeJoinRequest(playerName_));
@@ -271,6 +297,20 @@ void GameClient::HandleMessage(const Message& message) {
             SetState(ClientConnectionState::Rejected, message.joinRejected.reason);
             break;
         case MessageType::WorldState:
+            if (serverTick_ > 0) {
+                if (message.worldState.tick < serverTick_) {
+                    DebugNetLog("world tick regressed prev=%u curr=%u", serverTick_,
+                                message.worldState.tick);
+                } else {
+                    const uint32_t delta = message.worldState.tick - serverTick_;
+                    if (delta > 3) {
+                        DebugNetLog("world tick gap=%u prev=%u curr=%u players=%zu enemies=%zu",
+                                    delta, serverTick_, message.worldState.tick,
+                                    message.worldState.players.size(),
+                                    message.worldState.enemies.size());
+                    }
+                }
+            }
             serverTick_ = message.worldState.tick;
             players_ = message.worldState.players;
             enemies_ = message.worldState.enemies;

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <cstring>
 
 #include "common/entity_defs.hpp"
@@ -648,7 +649,13 @@ std::optional<Message> DeserializeMessage(const std::string& jsonText) {
         }
 
         return message;
-    } catch (const std::exception&) {
+    } catch (const std::exception& ex) {
+        constexpr size_t kPreviewChars = 180;
+        const std::string preview =
+            jsonText.substr(0, std::min(kPreviewChars, jsonText.size()));
+        std::fprintf(stderr,
+                     "[proto] deserialize failed: %s len=%zu preview=\"%s\"\n",
+                     ex.what(), jsonText.size(), preview.c_str());
         return std::nullopt;
     }
 }
