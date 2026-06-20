@@ -302,6 +302,8 @@ static bool gNameInputFocused =
 #else
     true;
 #endif
+static bool gNameUsesWebInput = false;
+static bool gChatUsesWebInput = false;
 static bool gChatExpanded = false;
 static bool gOptionsOpen = false;
 static Color gLocalColor = RAYWHITE;
@@ -332,6 +334,7 @@ static std::unordered_map<int, EntityVisualState> gPlayerVisuals;
 static std::unordered_map<int, EntityVisualState> gEnemyVisuals;
 static std::vector<FloatingDamage> gFloatingDamage;
 static uint32_t gLastSyncedTick = 0;
+static double gServerTickSnapTime = 0.0;
 static int gPendingSkillId = -1;
 static int gLastUnlockedSkillCount = 0;
 
@@ -352,6 +355,9 @@ static void ResetNameInputFocus();
 static Rectangle PlayerNameFieldRect();
 static Rectangle PlayerNameConnectButtonRect();
 static void ShowPlayerNameWebInput();
+static Rectangle ChatPanelRect();
+static Rectangle ChatInputFieldRect();
+static void ShowChatWebInput();
 static void HandlePlayerNameInput();
 static void DrawPlayerNameEntry();
 static bool ConnectToServer();
@@ -386,6 +392,8 @@ static void ResetNameInputFocus() {
 #if defined(PLATFORM_WEB)
     WebTextInputHide();
     gNameInputFocused = false;
+    gNameUsesWebInput = false;
+    gChatUsesWebInput = false;
 #else
     gNameInputFocused = true;
 #endif
@@ -406,13 +414,31 @@ static void ShowPlayerNameWebInput() {
 #endif
 }
 
+static Rectangle ChatInputFieldRect() {
+    const Rectangle panel = ChatPanelRect();
+    const float inputY = panel.y + panel.height - 34.0f;
+    return {
+        panel.x + 8.0f,
+        inputY,
+        panel.width - 16.0f,
+        26.0f,
+    };
+}
+
+static void ShowChatWebInput() {
+#if defined(PLATFORM_WEB)
+    const Rectangle screenRect = gViewport.VirtualToScreenRect(ChatInputFieldRect());
+    WebTextInputShow(screenRect, gChatInput.c_str(), net::kMaxChatLength);
+#endif
+}
+
 static void HandlePlayerNameInput() {
     if (!gEditingName) {
         return;
     }
 
 #if defined(PLATFORM_WEB)
-    if (gNameInputFocused) {
+    if (gNameInputFocused && gNameUsesWebInput) {
         ShowPlayerNameWebInput();
         gPlayerName = WebTextInputGetValue();
         if (WebTextInputConsumeSubmit() && !gPlayerName.empty()) {
@@ -435,25 +461,41 @@ static void HandlePlayerNameInput() {
 
         if (WasUiButtonPressed(PlayerNameFieldRect())) {
             gNameInputFocused = true;
-            ShowPlayerNameWebInput();
+            gNameUsesWebInput = gPointer.UsesTouch();
+#if defined(PLATFORM_WEB)
+            if (gNameUsesWebInput) {
+                ShowPlayerNameWebInput();
+            } else {
+                WebTextInputHide();
+            }
+#endif
             return;
         }
 
         if (gNameInputFocused &&
             !CheckCollisionPointRec(GetVirtualMousePosition(), PlayerNameFieldRect()) &&
             !CheckCollisionPointRec(GetVirtualMousePosition(), PlayerNameConnectButtonRect())) {
+            const bool wasUsingWebInput = gNameUsesWebInput;
             gNameInputFocused = false;
+            gNameUsesWebInput = false;
 #if defined(PLATFORM_WEB)
-            gPlayerName = WebTextInputGetValue();
+            if (wasUsingWebInput) {
+                gPlayerName = WebTextInputGetValue();
+            }
             WebTextInputHide();
 #endif
         }
     }
 
-#if !defined(PLATFORM_WEB)
     if (!gNameInputFocused) {
         return;
     }
+
+#if defined(PLATFORM_WEB)
+    if (gNameUsesWebInput) {
+        return;
+    }
+#endif
 
     int key = GetCharPressed();
     while (key > 0) {
@@ -470,7 +512,6 @@ static void HandlePlayerNameInput() {
     if (IsKeyPressed(KEY_ENTER) && !gPlayerName.empty()) {
         ConnectToServer();
     }
-#endif
 }
 
 static void DrawPlayerNameEntry() {
@@ -1206,8 +1247,30 @@ static void ResetClientVisualState() {
     gEnemyVisuals.clear();
     gFloatingDamage.clear();
     gLastSyncedTick = 0;
+    gServerTickSnapTime = 0.0;
     gPendingSkillId = -1;
     gLastUnlockedSkillCount = 0;
+}
+
+// Extrapolate server tick between WorldState packets so sprite animations advance
+// every render frame. Positions already interpolate this way; raw serverTick jumps
+// when packets arrive late or batched (common over WebSocket), skipping anim frames.
+static uint32_t DisplayServerTick() {
+    const uint32_t tick = gClient.GetServerTick();
+    if (tick == 0 || gClient.GetState() != net::ClientConnectionState::Joined) {
+        return tick;
+    }
+
+    const double elapsed = GetTime() - gServerTickSnapTime;
+    if (elapsed <= 0.0) {
+        return tick;
+    }
+
+    constexpr uint32_t kMaxLeadTicks = 2;
+    const uint32_t lead = std::min(
+        kMaxLeadTicks,
+        static_cast<uint32_t>(elapsed / static_cast<double>(net::kTickDuration)));
+    return tick + lead;
 }
 
 static Vector2 InterpolatedPosition(const EntityVisualState& visual) {
@@ -1268,6 +1331,7 @@ static void SyncEntityVisuals() {
     if (tick == gLastSyncedTick && !gPlayerVisuals.empty()) {
         return;
     }
+    gServerTickSnapTime = GetTime();
     gLastSyncedTick = tick;
 
     std::unordered_map<int, EntityVisualState> nextPlayers;
@@ -1694,7 +1758,7 @@ static void DrawSkillEffects() {
         return;
     }
 
-    const uint32_t tick = gClient.GetServerTick();
+    const uint32_t tick = DisplayServerTick();
     for (const net::SkillEffectState& effect : gClient.GetSession().skillEffects) {
         const net::SkillId skillId = net::SkillIdFromInt(effect.skillId);
         const int frame = SkillEffectFrame(tick, effect.startTick);
@@ -1777,11 +1841,13 @@ static void OnConnectionState(net::ClientConnectionState state, const std::strin
 
 static bool ConnectToServer() {
 #if defined(PLATFORM_WEB)
-    if (gNameInputFocused) {
+    if (gNameInputFocused && gNameUsesWebInput) {
         gPlayerName = WebTextInputGetValue();
     }
     WebTextInputHide();
     gNameInputFocused = false;
+    gNameUsesWebInput = false;
+    gChatUsesWebInput = false;
 #endif
 #if defined(PLATFORM_WEB)
     const std::string url = net::BuildWebSocketUrl();
@@ -1970,11 +2036,36 @@ static void HandleUiClicks() {
         if (gChatExpanded) {
             gChatExpanded = false;
             gChatInput.clear();
+#if defined(PLATFORM_WEB)
+            gChatUsesWebInput = false;
+            WebTextInputHide();
+#endif
         } else {
             gChatExpanded = true;
         }
         return;
     }
+
+#if defined(PLATFORM_WEB)
+    if (gChatExpanded) {
+        const Vector2 pointerPos = GetVirtualMousePosition();
+        const bool touchesChatInput = CheckCollisionPointRec(pointerPos, ChatInputFieldRect());
+        if (touchesChatInput) {
+            gChatUsesWebInput = gPointer.UsesTouch();
+            if (gChatUsesWebInput) {
+                ShowChatWebInput();
+            } else {
+                WebTextInputHide();
+            }
+            return;
+        }
+
+        if (!CheckCollisionPointRec(pointerPos, ChatPanelRect())) {
+            gChatUsesWebInput = false;
+            WebTextInputHide();
+        }
+    }
+#endif
 
     if (gClient.GetState() == net::ClientConnectionState::Joined &&
         WasUiButtonPressed(DisengageButtonRect(), IsLocalPlayerInCombat())) {
@@ -2210,6 +2301,17 @@ static void DrawGridHighlights() {
 }
 
 static void HandleChatInput() {
+#if defined(PLATFORM_WEB)
+    if (gChatUsesWebInput) {
+        ShowChatWebInput();
+        gChatInput = WebTextInputGetValue();
+        if (WebTextInputConsumeSubmit() && !gChatInput.empty()) {
+            gClient.SendChat(gChatInput);
+            gChatInput.clear();
+        }
+    }
+#endif
+
     int key = GetCharPressed();
     while (key > 0) {
         if (key >= 32 && key <= 125 &&
@@ -2272,6 +2374,10 @@ static void UpdateGame() {
         } else if (gChatExpanded) {
             gChatExpanded = false;
             gChatInput.clear();
+#if defined(PLATFORM_WEB)
+            gChatUsesWebInput = false;
+            WebTextInputHide();
+#endif
         }
     }
 
@@ -2416,7 +2522,7 @@ static void DrawPlayerSprite(const net::PlayerState& player, Color color) {
     }
     const bool combatHitFlash =
         player.state == net::EntityState::Combat && IsCombatHitFlashing(visual);
-    gPlayerSprites.Draw(player, gClient.GetServerTick(), center, color, combatHitFlash);
+    gPlayerSprites.Draw(player, DisplayServerTick(), center, color, combatHitFlash);
     DrawPlayerBars(player, center);
 }
 
@@ -2444,7 +2550,7 @@ static void DrawEnemy(const net::EnemyState& enemy) {
     }
     const bool combatHitFlash =
         enemy.state == net::EntityState::Combat && IsCombatHitFlashing(visual);
-    gGoblinSprites.Draw(enemy, gClient.GetServerTick(), center, combatHitFlash);
+    gGoblinSprites.Draw(enemy, DisplayServerTick(), center, combatHitFlash);
     if (enemy.state != net::EntityState::Dead) {
         const net::EntityDef& def = net::DefaultEntityRegistry().MustFind(enemy.kind);
         DrawEntityHpBar(center, enemy.hp, def.stats.maxHp, def.spriteHeight);
