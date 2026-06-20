@@ -1,4 +1,5 @@
 #include "raylib.h"
+#include "rlgl.h"
 
 #include <cstdio>
 #include <algorithm>
@@ -108,13 +109,8 @@ struct SpriteSheet {
         if (frame < 0) frame = 0;
 
         const float frameX = static_cast<float>(frame * frameWidth);
-        const Rectangle source = facingRight
-                         ? Rectangle{frameX, 0.0f,
-                             static_cast<float>(frameWidth),
-                             static_cast<float>(frameHeight)}
-                         : Rectangle{frameX + static_cast<float>(frameWidth), 0.0f,
-                             -static_cast<float>(frameWidth),
-                             static_cast<float>(frameHeight)};
+        const Rectangle source = {frameX, 0.0f, static_cast<float>(frameWidth),
+                      static_cast<float>(frameHeight)};
 
         const float scale = spriteHeight / static_cast<float>(frameHeight);
         const float drawWidth = static_cast<float>(frameWidth) * scale;
@@ -126,7 +122,23 @@ struct SpriteSheet {
             drawHeight,
         };
 
-        DrawTexturePro(texture, source, dest, Vector2{0.0f, 0.0f}, 0.0f, tint);
+        if (facingRight) {
+            DrawTexturePro(texture, source, dest, Vector2{0.0f, 0.0f}, 0.0f, tint);
+            return;
+        }
+
+        const Rectangle localDest = {
+            -drawWidth * 0.5f,
+            -drawHeight * 0.5f,
+            drawWidth,
+            drawHeight,
+        };
+
+        rlPushMatrix();
+        rlTranslatef(center.x, center.y, 0.0f);
+        rlScalef(-1.0f, 1.0f, 1.0f);
+        DrawTexturePro(texture, source, localDest, Vector2{0.0f, 0.0f}, 0.0f, tint);
+        rlPopMatrix();
     }
 };
 
