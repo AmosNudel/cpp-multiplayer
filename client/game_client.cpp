@@ -95,6 +95,20 @@ uint32_t NowMs() {
         std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
 }
 
+bool IsLoopingAnim(PlayerAnim anim) {
+    return anim == PlayerAnim::Idle || anim == PlayerAnim::Run;
+}
+
+template <typename T>
+const T* FindById(const std::vector<T>& values, int id) {
+    for (const T& value : values) {
+        if (value.id == id) {
+            return &value;
+        }
+    }
+    return nullptr;
+}
+
 }  // namespace
 
 bool GameClient::ConnectDesktop(const std::string& host, uint16_t port,
@@ -362,7 +376,7 @@ void GameClient::HandleMessage(const Message& message) {
             pendingDetail_ = message.joinRejected.reason;
             SetState(ClientConnectionState::Rejected, message.joinRejected.reason);
             break;
-        case MessageType::WorldState:
+        case MessageType::WorldState: {
             ++worldStateCount;
             if (serverTick_ > 0) {
                 if (message.worldState.tick < serverTick_) {
@@ -457,11 +471,40 @@ void GameClient::HandleMessage(const Message& message) {
                 }
             }
 
+            std::vector<PlayerState> nextPlayers = message.worldState.players;
+            for (PlayerState& next : nextPlayers) {
+                const PlayerState* prev = FindById(players_, next.id);
+                if (prev == nullptr) {
+                    continue;
+                }
+
+                // Preserve looping animation continuity when only timestamps changed.
+                if (next.state == prev->state && next.anim == prev->anim &&
+                    IsLoopingAnim(next.anim)) {
+                    next.animStartTick = prev->animStartTick;
+                }
+            }
+
+            std::vector<EnemyState> nextEnemies = message.worldState.enemies;
+            for (EnemyState& next : nextEnemies) {
+                const EnemyState* prev = FindById(enemies_, next.id);
+                if (prev == nullptr) {
+                    continue;
+                }
+
+                // Same continuity rule for enemy idle/run loops.
+                if (next.state == prev->state && next.anim == prev->anim &&
+                    IsLoopingAnim(next.anim)) {
+                    next.animStartTick = prev->animStartTick;
+                }
+            }
+
             serverTick_ = message.worldState.tick;
-            players_ = message.worldState.players;
-            enemies_ = message.worldState.enemies;
+            players_ = std::move(nextPlayers);
+            enemies_ = std::move(nextEnemies);
             session_ = message.worldState.session;
             break;
+        }
         case MessageType::PlayerLeft:
             players_.erase(
                 std::remove_if(players_.begin(), players_.end(),
