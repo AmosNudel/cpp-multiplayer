@@ -84,6 +84,7 @@ struct SpriteSheet {
             TraceLog(LOG_WARNING, "Failed to load sprite sheet: %s", path);
             return;
         }
+        SetTextureFilter(texture, TEXTURE_FILTER_POINT);
         frameCount = frames;
         frameWidth = texture.width / frameCount;
         frameHeight = texture.height;
@@ -107,24 +108,23 @@ struct SpriteSheet {
         if (frame < 0) frame = 0;
 
         const float frameX = static_cast<float>(frame * frameWidth);
-        const Rectangle source = {frameX, 0.0f, static_cast<float>(frameWidth),
-                                  static_cast<float>(frameHeight)};
+        const Rectangle source = facingRight
+                         ? Rectangle{frameX, 0.0f,
+                             static_cast<float>(frameWidth),
+                             static_cast<float>(frameHeight)}
+                         : Rectangle{frameX + static_cast<float>(frameWidth), 0.0f,
+                             -static_cast<float>(frameWidth),
+                             static_cast<float>(frameHeight)};
 
         const float scale = spriteHeight / static_cast<float>(frameHeight);
         const float drawWidth = static_cast<float>(frameWidth) * scale;
         const float drawHeight = static_cast<float>(frameHeight) * scale;
-        Rectangle dest = {
+        const Rectangle dest = {
             center.x - drawWidth * 0.5f,
             center.y - drawHeight * 0.5f,
             drawWidth,
             drawHeight,
         };
-
-        if (!facingRight) {
-            // Flip in destination space to keep source UVs stable on WebGL.
-            dest.x += drawWidth;
-            dest.width = -drawWidth;
-        }
 
         DrawTexturePro(texture, source, dest, Vector2{0.0f, 0.0f}, 0.0f, tint);
     }
