@@ -74,9 +74,9 @@ void DebugNetLog(const char* format, ...) {
 
     std::va_list args;
     va_start(args, format);
-    std::fputs("[net-debug] ", stderr);
-    std::vfprintf(stderr, format, args);
-    std::fputc('\n', stderr);
+    std::fputs("[net-debug] ", stdout);
+    std::vfprintf(stdout, format, args);
+    std::fputc('\n', stdout);
     va_end(args);
 }
 
@@ -124,9 +124,11 @@ bool GameClient::ConnectWeb(const std::string& wsUrl, const std::string& playerN
     DebugNetLog("connect ws url=%s player=%s", wsUrl.c_str(), playerName.c_str());
 
     auto onOpen = [this]() {
+        DebugNetLog("ws open, sending join request player=%s", playerName_.c_str());
         wsClient_.Send(MakeJoinRequest(playerName_));
     };
     auto onError = [this](const std::string& reason) {
+        DebugNetLog("ws error reason=%s", reason.c_str());
         pendingDisconnect_ = true;
         pendingDetail_ = reason;
     };
@@ -329,8 +331,14 @@ void GameClient::SendActive(const Message& message) {
 }
 
 void GameClient::HandleMessage(const Message& message) {
+    static uint32_t worldStateCount = 0;
+
     switch (message.type) {
         case MessageType::JoinAccepted:
+            DebugNetLog("join accepted playerId=%d players=%zu enemies=%zu",
+                        message.joinAccepted.playerId,
+                        message.joinAccepted.players.size(),
+                        message.joinAccepted.enemies.size());
             localPlayerId_ = message.joinAccepted.playerId;
             players_ = message.joinAccepted.players;
             enemies_ = message.joinAccepted.enemies;
@@ -339,17 +347,23 @@ void GameClient::HandleMessage(const Message& message) {
             SetState(ClientConnectionState::Joined, "Joined game");
             break;
         case MessageType::JoinRejected:
+            DebugNetLog("join rejected reason=%s", message.joinRejected.reason.c_str());
             pendingDisconnect_ = true;
             pendingDetail_ = message.joinRejected.reason;
             SetState(ClientConnectionState::Rejected, message.joinRejected.reason);
             break;
         case MessageType::WorldState:
+            ++worldStateCount;
             if (serverTick_ > 0) {
                 if (message.worldState.tick < serverTick_) {
                     DebugNetLog("world tick regressed prev=%u curr=%u", serverTick_,
                                 message.worldState.tick);
                 } else {
                     const uint32_t delta = message.worldState.tick - serverTick_;
+                    if (delta == 0 && (worldStateCount % 40 == 0)) {
+                        DebugNetLog("world duplicate tick=%u count=%u", message.worldState.tick,
+                                    worldStateCount);
+                    }
                     if (delta > 3) {
                         DebugNetLog("world tick gap=%u prev=%u curr=%u players=%zu enemies=%zu",
                                     delta, serverTick_, message.worldState.tick,
@@ -357,6 +371,12 @@ void GameClient::HandleMessage(const Message& message) {
                                     message.worldState.enemies.size());
                     }
                 }
+            }
+            if (worldStateCount % 20 == 0) {
+                DebugNetLog("world stream count=%u tick=%u players=%zu enemies=%zu ping=%dms",
+                            worldStateCount, message.worldState.tick,
+                            message.worldState.players.size(),
+                            message.worldState.enemies.size(), pingMs_);
             }
             serverTick_ = message.worldState.tick;
             players_ = message.worldState.players;

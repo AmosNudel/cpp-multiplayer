@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <vector>
@@ -58,6 +59,58 @@ static const char* kGoblinDeathSpritePath = "assets/enemy/Goblin/Death.png";
 static const char* kThunderVfxPath = "assets/vfx/Thunderstrike w blur.png";
 static const float kPlayerSpriteHeight = 96.0f;
 static constexpr float kGridScreenBottom = WorldView::kGridVirtualY + net::kWorldHeight;
+
+#if defined(PLATFORM_WEB)
+EM_JS(int, JsPerfDebugEnabled, (), {
+    try {
+        if (typeof window === 'undefined') {
+            return 0;
+        }
+
+        const params = new URLSearchParams(window.location.search || '');
+        const query = (params.get('netdebug') || '').toLowerCase();
+        if (query === '1' || query === 'true' || query === 'yes') {
+            return 1;
+        }
+
+        const local = window.localStorage
+            ? (window.localStorage.getItem('NET_DEBUG_WS') || '').toLowerCase()
+            : '';
+        if (local === '1' || local === 'true' || local === 'yes') {
+            return 1;
+        }
+
+        if (window.NET_DEBUG_WS === true || window.NET_DEBUG_WS === 1) {
+            return 1;
+        }
+    } catch (e) {
+    }
+    return 0;
+});
+#endif
+
+static bool IsPerfDebugEnabled() {
+    static int cached = -1;
+    if (cached >= 0) {
+        return cached == 1;
+    }
+
+    const char* value = std::getenv("NET_DEBUG_WS");
+    if (value != nullptr && value[0] != '\0') {
+        cached = (value[0] == '1' || value[0] == 't' || value[0] == 'T' || value[0] == 'y' ||
+                  value[0] == 'Y')
+                     ? 1
+                     : 0;
+        return cached == 1;
+    }
+
+#if defined(PLATFORM_WEB)
+    cached = JsPerfDebugEnabled() != 0 ? 1 : 0;
+#else
+    cached = 0;
+#endif
+    return cached == 1;
+}
 
 static std::string ResolveAssetPath(const char* relativePath) {
     const std::string relative = relativePath;
@@ -2680,8 +2733,21 @@ static void DrawGame() {
 
 #if defined(PLATFORM_WEB)
 static void MainLoop() {
+    const double frameStart = GetTime();
     UpdateGame();
     DrawGame();
+
+    if (IsPerfDebugEnabled()) {
+        const double frameMs = (GetTime() - frameStart) * 1000.0;
+        if (frameMs > 40.0) {
+            std::printf("[perf-debug] frame hitch frame_ms=%.1f state=%d players=%zu enemies=%zu ping=%d\n",
+                        frameMs,
+                        static_cast<int>(gClient.GetState()),
+                        gClient.GetPlayers().size(),
+                        gClient.GetEnemies().size(),
+                        gClient.GetPingMs());
+        }
+    }
 }
 
 int main() {
