@@ -530,6 +530,12 @@ void StartPlayerComboPhase(PlayerState& player, ConnectedClient& client, PlayerC
     RestartEntityAnim(player.anim, player.animStartTick, anim, tick);
 }
 
+void StartPlayerComboPause(ConnectedClient& client, PlayerComboPhase phase, uint32_t tick) {
+    client.comboPhase = phase;
+    client.comboPhaseStartTick = tick;
+    client.comboSwingDamageDealt = false;
+}
+
 PlayerAnim AnimForComboPhase(PlayerComboPhase phase) {
     switch (phase) {
         case PlayerComboPhase::Attack1: return PlayerAnim::Attack1;
@@ -943,8 +949,8 @@ void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
     switch (client.comboPhase) {
         case PlayerComboPhase::Attack1:
             if (IsAnimFinished(PlayerAnim::Attack1, tick, client.comboPhaseStartTick)) {
-                StartPlayerComboPhase(player, client, PlayerComboPhase::PauseAfter1,
-                                      PlayerAnim::Idle, tick);
+                // Hold the last attack frame during the pause window to avoid visual flicker.
+                StartPlayerComboPause(client, PlayerComboPhase::PauseAfter1, tick);
             }
             break;
         case PlayerComboPhase::PauseAfter1:
@@ -955,8 +961,8 @@ void UpdatePlayerCombo(PlayerState& player, ConnectedClient& client,
             break;
         case PlayerComboPhase::Attack2:
             if (IsAnimFinished(PlayerAnim::Attack2, tick, client.comboPhaseStartTick)) {
-                StartPlayerComboPhase(player, client, PlayerComboPhase::PauseAfter2,
-                                      PlayerAnim::Idle, tick);
+                // Hold the last attack frame during the pause window to avoid visual flicker.
+                StartPlayerComboPause(client, PlayerComboPhase::PauseAfter2, tick);
             }
             break;
         case PlayerComboPhase::PauseAfter2:
@@ -1060,12 +1066,10 @@ void UpdateGoblinBossCombat(EnemyState& enemy, EnemyMovementState& move,
                 case BossComboPhase::Swing1:
                     move.bossComboPhase = BossComboPhase::PauseAfter1;
                     move.bossComboPhaseStartTick = tick;
-                    SetEntityAnim(enemy.anim, enemy.animStartTick, PlayerAnim::Idle, tick);
                     break;
                 case BossComboPhase::Swing2:
                     move.bossComboPhase = BossComboPhase::PauseAfter2;
                     move.bossComboPhaseStartTick = tick;
-                    SetEntityAnim(enemy.anim, enemy.animStartTick, PlayerAnim::Idle, tick);
                     break;
                 case BossComboPhase::Swing3:
                     StartBossComboCycle(enemy, move, tick);
