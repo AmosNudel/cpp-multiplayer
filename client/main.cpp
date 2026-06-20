@@ -1,5 +1,4 @@
 #include "raylib.h"
-#include "rlgl.h"
 
 #include <cstdio>
 #include <algorithm>
@@ -86,6 +85,7 @@ struct SpriteSheet {
             return;
         }
         SetTextureFilter(texture, TEXTURE_FILTER_POINT);
+        SetTextureWrap(texture, TEXTURE_WRAP_CLAMP);
         frameCount = frames;
         frameWidth = texture.width / frameCount;
         frameHeight = texture.height;
@@ -109,36 +109,27 @@ struct SpriteSheet {
         if (frame < 0) frame = 0;
 
         const float frameX = static_cast<float>(frame * frameWidth);
-        const Rectangle source = {frameX, 0.0f, static_cast<float>(frameWidth),
-                      static_cast<float>(frameHeight)};
+        // Trim a tiny epsilon from frame edges to avoid sampling neighbors on WebGL.
+        const float uvInset = 0.01f;
+        const float sampleWidth = static_cast<float>(frameWidth) - uvInset * 2.0f;
+        const float sourceY = uvInset;
+        const float sourceH = static_cast<float>(frameHeight) - uvInset * 2.0f;
+        const Rectangle source = facingRight
+                         ? Rectangle{frameX + uvInset, sourceY, sampleWidth, sourceH}
+                         : Rectangle{frameX + uvInset + sampleWidth, sourceY,
+                             -sampleWidth, sourceH};
 
         const float scale = spriteHeight / static_cast<float>(frameHeight);
         const float drawWidth = static_cast<float>(frameWidth) * scale;
         const float drawHeight = static_cast<float>(frameHeight) * scale;
         const Rectangle dest = {
-            center.x - drawWidth * 0.5f,
-            center.y - drawHeight * 0.5f,
+            std::round(center.x - drawWidth * 0.5f),
+            std::round(center.y - drawHeight * 0.5f),
             drawWidth,
             drawHeight,
         };
 
-        if (facingRight) {
-            DrawTexturePro(texture, source, dest, Vector2{0.0f, 0.0f}, 0.0f, tint);
-            return;
-        }
-
-        const Rectangle localDest = {
-            -drawWidth * 0.5f,
-            -drawHeight * 0.5f,
-            drawWidth,
-            drawHeight,
-        };
-
-        rlPushMatrix();
-        rlTranslatef(center.x, center.y, 0.0f);
-        rlScalef(-1.0f, 1.0f, 1.0f);
-        DrawTexturePro(texture, source, localDest, Vector2{0.0f, 0.0f}, 0.0f, tint);
-        rlPopMatrix();
+        DrawTexturePro(texture, source, dest, Vector2{0.0f, 0.0f}, 0.0f, tint);
     }
 };
 
