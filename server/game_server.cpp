@@ -1022,7 +1022,6 @@ void UpdateGoblinCombat(EnemyState& enemy, std::vector<PlayerState>& players, ui
         if (GoblinAnimFinished(PlayerAnim::Attack1, tick, enemy.animStartTick)) {
             enemy.lastAttackTick = tick;
             enemy.attackDamageDealt = false;
-            SetEntityAnim(enemy.anim, enemy.animStartTick, PlayerAnim::Idle, tick);
         }
         return;
     }
