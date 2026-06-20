@@ -107,28 +107,24 @@ struct SpriteSheet {
         if (frame < 0) frame = 0;
 
         const float frameX = static_cast<float>(frame * frameWidth);
-        const Rectangle source = facingRight
-                                     ? Rectangle{frameX, 0.0f,
-                                                 static_cast<float>(frameWidth),
-                                                 static_cast<float>(frameHeight)}
-                                     : Rectangle{frameX + static_cast<float>(frameWidth), 0.0f,
-                                                 -static_cast<float>(frameWidth),
-                                                 static_cast<float>(frameHeight)};
-
-        if (!facingRight && (frame == 0 || frame == frameCount - 1)) {
-            std::printf("[flip-debug] flipped frame=%d/%d source_x=%.1f width=%.1f\n", frame,
-                        frameCount, source.x, source.width);
-        }
+        const Rectangle source = {frameX, 0.0f, static_cast<float>(frameWidth),
+                                  static_cast<float>(frameHeight)};
 
         const float scale = spriteHeight / static_cast<float>(frameHeight);
         const float drawWidth = static_cast<float>(frameWidth) * scale;
         const float drawHeight = static_cast<float>(frameHeight) * scale;
-        const Rectangle dest = {
+        Rectangle dest = {
             center.x - drawWidth * 0.5f,
             center.y - drawHeight * 0.5f,
             drawWidth,
             drawHeight,
         };
+
+        if (!facingRight) {
+            // Flip in destination space to keep source UVs stable on WebGL.
+            dest.x += drawWidth;
+            dest.width = -drawWidth;
+        }
 
         DrawTexturePro(texture, source, dest, Vector2{0.0f, 0.0f}, 0.0f, tint);
     }
